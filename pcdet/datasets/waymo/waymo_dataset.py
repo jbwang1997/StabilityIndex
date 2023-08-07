@@ -455,6 +455,30 @@ class WaymoDataset(DatasetTemplate):
             ap_result_str, ap_dict = kitti_eval(eval_det_annos, eval_gt_annos)
         elif kwargs['eval_metric'] == 'waymo':
             ap_result_str, ap_dict = waymo_eval(eval_det_annos, eval_gt_annos)
+        elif kwargs['eval_metric'] == 'stable_index':
+            frame_id_mapper = {info['frame_id']: i for i, info in enumerate(self.infos)}
+            cur_det_annos, pre_det_annos = [], []
+            cur_gt_annos, pre_gt_annos = [], []
+            for i, info in enumerate(self.infos):
+                sequence_name = info['point_cloud']['lidar_sequence']
+                sample_idx = info['point_cloud']['sample_idx']
+                # filter out frame withous previous information
+                pre_sample_idx = sample_idx - self.dataset_cfg.SAMPLED_INTERVAL[self.mode]
+                pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
+                if pre_frame_idx not in frame_id_mapper:
+                    continue
+
+                cur_det_annos.append(eval_det_annos[i])
+                cur_gt_annos.append(eval_gt_annos[i])
+                pre_det_annos.append(eval_det_annos[frame_id_mapper[pre_frame_idx]])
+                pre_gt_annos.append(eval_gt_annos[frame_id_mapper[pre_frame_idx]])
+
+            from .stable_index_eval import eval_stable_index
+            ap_dict = eval_stable_index(
+                cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names=class_names)
+            ap_result_str = '\n'
+            for key in ap_dict:
+                ap_result_str += '%s: %.4f \n' % (key, ap_dict[key])
         else:
             raise NotImplementedError
 
