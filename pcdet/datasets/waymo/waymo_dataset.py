@@ -463,7 +463,7 @@ class WaymoDataset(DatasetTemplate):
                 sequence_name = info['point_cloud']['lidar_sequence']
                 sample_idx = info['point_cloud']['sample_idx']
                 # filter out frame withous previous information
-                pre_sample_idx = sample_idx - self.dataset_cfg.SAMPLED_INTERVAL[self.mode]
+                pre_sample_idx = sample_idx - 5
                 pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
                 if pre_frame_idx not in frame_id_mapper:
                     continue

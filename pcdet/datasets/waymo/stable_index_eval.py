@@ -4,7 +4,9 @@ import pickle
 import argparse
 import numpy as np
 from collections import defaultdict
-from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou_bev, boxes_aligned_iou3d_gpu
+from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou_bev, boxes_aligned_iou3d_gpu, boxes_iou3d_gpu
+from torch_scatter import scatter_max
+from tqdm import tqdm
 
 MAX_IOU_BATCH = 100000
 
@@ -113,6 +115,9 @@ def get_heading_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
 
 
 def max_iou_assign_det_and_gt(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
+    if det_boxes.shape[0] == 0:
+        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
+
     det_boxes_ = copy.deepcopy(det_boxes)
     gt_boxes_ = copy.deepcopy(gt_boxes)
     for i, class_name in enumerate(class_names):
@@ -123,7 +128,7 @@ def max_iou_assign_det_and_gt(det_boxes, det_scores, det_names, gt_boxes, gt_nam
     
     gt_boxes_ = torch.from_numpy(gt_boxes_).float().cuda()
     det_boxes_ = torch.from_numpy(det_boxes_).float().cuda()
-    ious = boxes_iou_bev(gt_boxes_, det_boxes_)
+    ious = boxes_iou3d_gpu(gt_boxes_, det_boxes_)
     max_iou, max_idx = torch.max(ious, axis=1)
     max_iou = max_iou.cpu().numpy()
     max_idx = max_idx.cpu().numpy()
@@ -131,9 +136,9 @@ def max_iou_assign_det_and_gt(det_boxes, det_scores, det_names, gt_boxes, gt_nam
     aligned_boxes = det_boxes[max_idx]
     aligned_scores = det_scores[max_idx]
     # if the max_iou < 0.3, we think this gt has no aligned detection boxes.
-    if (max_iou < 0.3).any():
-        aligned_scores[max_iou < 0.3] = 0
-        aligned_boxes[max_iou < 0.3] = gt_boxes[max_iou < 0.3]
+    if (max_iou < 0.1).any():
+        aligned_scores[max_iou < 0.1] = 0
+        aligned_boxes[max_iou < 0.1] = gt_boxes[max_iou < 0.1]
 
     return aligned_boxes, aligned_scores
 
@@ -160,8 +165,8 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
     pre_gt_annos = copy.deepcopy(pre_gt_annos)
 
     paired_infos = defaultdict(list)
-    for cur_det_anno, pre_det_anno, cur_gt_anno, pre_gt_anno in zip(
-        cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos):
+    for cur_det_anno, pre_det_anno, cur_gt_anno, pre_gt_anno in tqdm(zip(
+        cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos)):
         # prepare gt boxes3d
         cur_box_mask = generate_gt_box_mask(cur_gt_anno, class_names)
         pre_box_mask = generate_gt_box_mask(pre_gt_anno, class_names)
@@ -206,8 +211,6 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
         pre_det_boxes3d = pre_det_anno['boxes_lidar']
         if pre_det_boxes3d.shape[-1] == 9:
             pre_det_boxes3d = pre_det_boxes3d[:, :7]
-        if cur_det_boxes3d.shape[0] == 0 or pre_det_boxes3d.shape[0] == 0:
-            continue
 
         # align prediction and gt by iou
         cur_det_boxes3d, cur_det_scores = \
@@ -225,14 +228,20 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
         paired_infos['cur_det_scores'].append(cur_det_scores)
         paired_infos['pre_det_boxes3d'].append(pre_det_boxes3d)
         paired_infos['pre_det_scores'].append(pre_det_scores)
-    
+        paired_infos['gt_names'].append(gt_names)
+
     paired_infos = dict(paired_infos)
     for key, value in paired_infos.items():
         paired_infos[key] = np.concatenate(value)
-        
+
+    not_det_mask = (paired_infos['pre_det_scores'] == 0) & (paired_infos['cur_det_scores'] == 0)
+    for key, value in paired_infos.items():
+        paired_infos[key] = value[~not_det_mask]
+    
     # calculate stable index
     metrics = dict()
-    score_diffs = np.abs(paired_infos['cur_det_scores'] - paired_infos['pre_det_scores'])
+    score_diffs = 1- np.abs(paired_infos['cur_det_scores'] - paired_infos['pre_det_scores'])
+    score_diffs = score_diffs / np.std(paired_infos['cur_det_scores'])
     trans_diffs = get_translation_variation(paired_infos['pre_det_boxes3d'],
                                             paired_infos['cur_det_boxes3d'],
                                             paired_infos['pre_gt_boxes3d'],
@@ -245,13 +254,22 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
                                           paired_infos['cur_det_boxes3d'],
                                           paired_infos['pre_gt_boxes3d'],
                                           paired_infos['cur_gt_boxes3d'])
-    stable_index = (1 - score_diffs) * (trans_diffs + size_diffs + heading_diffs) / 3
-    metrics['SCORE_VARIATION'] = (1 - score_diffs).mean()
-    metrics['TRANSLATION_VARIATION'] = trans_diffs.mean()
-    metrics['SIZE_VARIATION'] = size_diffs.mean()
-    metrics['HEADING_VARIATION'] = heading_diffs.mean()
-    metrics['STABLE_INDEX'] = stable_index.mean()
-    
+    stable_index = score_diffs * (trans_diffs + size_diffs + heading_diffs) / 3
+
+    for class_name in class_names:
+        class_mask = paired_infos['gt_names'] == class_name
+        cls_score_diffs = score_diffs[class_mask]
+        cls_trans_diffs = trans_diffs[class_mask]
+        cls_size_diffs = size_diffs[class_mask]
+        cls_heading_diffs = heading_diffs[class_mask]
+        cls_stable_index = stable_index[class_mask]
+        metrics['SCORE_VARIATION_%s' % class_name] = cls_score_diffs.mean()
+        # metrics['SCORE_VARIATION_%s' % class_name] = \
+        #     cls_score_diffs.mean() / np.std(paired_infos['cur_det_scores'])
+        metrics['TRANSLATION_VARIATION_%s' % class_name] = cls_trans_diffs.mean()
+        metrics['SIZE_VARIATION_%s' % class_name] = cls_size_diffs.mean()
+        metrics['HEADING_VARIATION_%s' % class_name] = cls_heading_diffs.mean()
+        metrics['STABLE_INDEX_%s' % class_name] = cls_stable_index.mean()
     return metrics
 
 
