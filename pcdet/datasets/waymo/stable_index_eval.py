@@ -7,6 +7,8 @@ from collections import defaultdict
 from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou_bev, boxes_aligned_iou3d_gpu, boxes_iou3d_gpu
 from torch_scatter import scatter_max
 from tqdm import tqdm
+from tabulate import tabulate
+import datetime
 
 MAX_IOU_BATCH = 100000
 
@@ -114,7 +116,7 @@ def get_heading_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
     return ious.cpu().numpy()[:, 0]
 
 
-def max_iou_assign_det_and_gt(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
+def align_det_and_gt_by_max_iou(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
     if det_boxes.shape[0] == 0:
         return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
 
@@ -143,6 +145,45 @@ def max_iou_assign_det_and_gt(det_boxes, det_scores, det_names, gt_boxes, gt_nam
     return aligned_boxes, aligned_scores
 
 
+def align_det_and_gt_by_max_score(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
+    if det_boxes.shape[0] == 0:
+        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
+
+    gt_boxes_ = torch.from_numpy(gt_boxes).float().cuda()
+    det_boxes_ = torch.from_numpy(det_boxes).float().cuda()
+    for i, class_name in enumerate(class_names):
+        det_mask = det_names == class_name
+        det_boxes_[det_mask][:, :2] = det_boxes_[det_mask][:, :2] + 1000 * i
+        gt_mask = gt_names == class_name
+        gt_boxes_[gt_mask][:, :2] = gt_boxes_[gt_mask][:, :2] + 1000 * i
+    det_scores_ = torch.from_numpy(det_scores).float().cuda()
+
+    ious = boxes_iou3d_gpu(det_boxes_, gt_boxes_)
+    ious = ious.clip(0, 1)
+    max_iou, max_idx = torch.max(ious, axis=1)
+
+    det_boxes = det_boxes[max_iou.cpu().numpy() > 0.1]
+    if det_boxes.shape[0] == 0:
+        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
+    det_scores_ = det_scores_[max_iou > 0.1]
+    max_idx = max_idx[max_iou > 0.1]
+    max_iou = max_iou[max_iou > 0.1]
+
+    num_gt, num_tp = gt_boxes.shape[0], max_iou.shape[0]
+    scatter_max_scores = torch.zeros(num_gt, dtype=torch.float32).cuda()
+    scatter_max_scores, scatter_max_idx = scatter_max(
+        det_scores_, max_idx, out=scatter_max_scores)
+    fn_mask = (scatter_max_idx < 0) | (scatter_max_idx > num_tp - 1)
+    scatter_max_idx = scatter_max_idx.clip(0, num_tp - 1)
+
+    aligned_idx = scatter_max_idx.cpu().numpy()
+    fn_mask = fn_mask.cpu().numpy()
+    aligned_boxes = det_boxes[aligned_idx]
+    aligned_boxes[fn_mask] = gt_boxes[fn_mask]
+    aligned_scores = scatter_max_scores.cpu().numpy()
+    return aligned_boxes, aligned_scores
+
+
 def generate_gt_box_mask(info, class_names):
     box_mask = np.array([n in class_names for n in info['name']], dtype=np.bool_)
     zero_difficulty_mask = info['difficulty'] == 0
@@ -153,7 +194,8 @@ def generate_gt_box_mask(info, class_names):
     return box_mask
 
 
-def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names):
+def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, 
+                      pre_gt_annos, class_names, align_func='max_iou'):
     num_frame_pair = len(cur_det_annos)
     assert len(pre_det_annos) == num_frame_pair
     assert len(cur_gt_annos) == num_frame_pair
@@ -165,8 +207,10 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
     pre_gt_annos = copy.deepcopy(pre_gt_annos)
 
     paired_infos = defaultdict(list)
-    for cur_det_anno, pre_det_anno, cur_gt_anno, pre_gt_anno in tqdm(zip(
-        cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos)):
+    for idx in tqdm(range(len(cur_gt_annos))):
+        cur_gt_anno, pre_gt_anno = cur_gt_annos[idx], pre_gt_annos[idx]
+        cur_det_anno, pre_det_anno = cur_det_annos[idx], pre_det_annos[idx]
+
         # prepare gt boxes3d
         cur_box_mask = generate_gt_box_mask(cur_gt_anno, class_names)
         pre_box_mask = generate_gt_box_mask(pre_gt_anno, class_names)
@@ -198,7 +242,7 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
         # sample num_points_in_gt
         cur_num_points = cur_gt_anno['num_points_in_gt'][cur_box_mask][cur_align_idx]
         pre_num_points = pre_gt_anno['num_points_in_gt'][pre_box_mask][pre_align_idx]
-        num_points_in_gt = ((cur_num_points + pre_num_points) / 2).astype(np.int)
+        num_points_in_gt = ((cur_num_points + pre_num_points) / 2).astype(np.int64)
 
         # prepare detected boxes3d
         pre_det_names = pre_det_anno['name']
@@ -213,12 +257,13 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
             pre_det_boxes3d = pre_det_boxes3d[:, :7]
 
         # align prediction and gt by iou
-        cur_det_boxes3d, cur_det_scores = \
-            max_iou_assign_det_and_gt(cur_det_boxes3d, cur_det_scores, cur_det_names,
-                                      cur_gt_boxes3d, gt_names, class_names)
-        pre_det_boxes3d, pre_det_scores = \
-            max_iou_assign_det_and_gt(pre_det_boxes3d, pre_det_scores, pre_det_names,
-                                      pre_gt_boxes3d, gt_names, class_names)
+        assert align_func in ['max_iou', 'max_score']
+        align_func = align_det_and_gt_by_max_iou if align_func == 'max_iou' \
+            else align_det_and_gt_by_max_score
+        cur_det_boxes3d, cur_det_scores = align_func(cur_det_boxes3d, cur_det_scores, cur_det_names,
+                                                     cur_gt_boxes3d, gt_names, class_names)
+        pre_det_boxes3d, pre_det_scores = align_func(pre_det_boxes3d, pre_det_scores, pre_det_names,
+                                                     pre_gt_boxes3d, gt_names, class_names)
 
         paired_infos['cur_gt_boxes3d'].append(cur_gt_boxes3d)
         paired_infos['pre_gt_boxes3d'].append(pre_gt_boxes3d)
@@ -240,8 +285,10 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
     
     # calculate stable index
     metrics = dict()
-    score_diffs = 1- np.abs(paired_infos['cur_det_scores'] - paired_infos['pre_det_scores'])
-    score_diffs = score_diffs / np.std(paired_infos['cur_det_scores'])
+    score_diffs = paired_infos['cur_det_scores'] - paired_infos['pre_det_scores']
+    score_diffs = score_diffs / (np.quantile(paired_infos['cur_det_scores'], 0.99) - \
+        np.quantile(paired_infos['cur_det_scores'], 0.01))
+
     trans_diffs = get_translation_variation(paired_infos['pre_det_boxes3d'],
                                             paired_infos['cur_det_boxes3d'],
                                             paired_infos['pre_gt_boxes3d'],
@@ -254,23 +301,75 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, 
                                           paired_infos['cur_det_boxes3d'],
                                           paired_infos['pre_gt_boxes3d'],
                                           paired_infos['cur_gt_boxes3d'])
-    stable_index = score_diffs * (trans_diffs + size_diffs + heading_diffs) / 3
+    stable_index = (1 - np.abs(score_diffs)) * (trans_diffs + size_diffs + heading_diffs) / 3
 
+    def get_values_by_mask(score_diffs, trans_diffs, size_diffs, heading_diffs, stable_index, mask):
+        return score_diffs[mask], trans_diffs[mask], size_diffs[mask], heading_diffs[mask], stable_index[mask]
+
+    metrics['DISTANCE_BREAKDOWN'] = {}
+    distances = np.linalg.norm(paired_infos['cur_det_boxes3d'][:, :3], axis=1)
+    
     for class_name in class_names:
         class_mask = paired_infos['gt_names'] == class_name
-        cls_score_diffs = score_diffs[class_mask]
-        cls_trans_diffs = trans_diffs[class_mask]
-        cls_size_diffs = size_diffs[class_mask]
-        cls_heading_diffs = heading_diffs[class_mask]
-        cls_stable_index = stable_index[class_mask]
-        metrics['SCORE_VARIATION_%s' % class_name] = cls_score_diffs.mean()
-        # metrics['SCORE_VARIATION_%s' % class_name] = \
-        #     cls_score_diffs.mean() / np.std(paired_infos['cur_det_scores'])
-        metrics['TRANSLATION_VARIATION_%s' % class_name] = cls_trans_diffs.mean()
-        metrics['SIZE_VARIATION_%s' % class_name] = cls_size_diffs.mean()
-        metrics['HEADING_VARIATION_%s' % class_name] = cls_heading_diffs.mean()
-        metrics['STABLE_INDEX_%s' % class_name] = cls_stable_index.mean()
-    return metrics
+        _score, _trans, _size, _heading, _stable_index = get_values_by_mask(
+            score_diffs, trans_diffs, size_diffs, heading_diffs, stable_index, class_mask)
+        metrics['SCORE_VARIATION_%s' % class_name] = (1 - np.abs(_score)).mean()
+        metrics['TRANSLATION_VARIATION_%s' % class_name] = _trans.mean()
+        metrics['SIZE_VARIATION_%s' % class_name] = _size.mean()
+        metrics['HEADING_VARIATION_%s' % class_name] = _heading.mean()
+        metrics['STABLE_INDEX_%s' % class_name] = _stable_index.mean()
+        
+        for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
+            distance_mask = (distances > distance[0]) & (distances <= distance[1])
+            cur_mask = class_mask & distance_mask
+            _score, _trans, _size, _heading, _stable_index = get_values_by_mask(
+                score_diffs, trans_diffs, size_diffs, heading_diffs, stable_index, cur_mask)
+            metrics['DISTANCE_BREAKDOWN']['SCORE_VARIATION_%s_%d' % (class_name, idx)] = (1 - np.abs(_score)).mean()
+            metrics['DISTANCE_BREAKDOWN']['TRANSLATION_VARIATION_%s_%d' % (class_name, idx)] = _trans.mean()
+            metrics['DISTANCE_BREAKDOWN']['SIZE_VARIATION_%s_%d' % (class_name, idx)] = _size.mean()
+            metrics['DISTANCE_BREAKDOWN']['HEADING_VARIATION_%s_%d' % (class_name, idx)] = _heading.mean()
+            metrics['DISTANCE_BREAKDOWN']['STABLE_INDEX_%s_%d' % (class_name, idx)] = _stable_index.mean()
+
+
+def print_metrics(metrics, class_names):
+    metrics_str = ''
+    metrics_str += '\n----------------------------------\n'
+    metrics_str += f'Stable Index (Overall)'
+    metrics_str += '\n----------------------------------\n'
+
+    metrics_data_print = []
+    for class_name in class_names:
+        metrics_data_print.append([class_name, metrics['STABLE_INDEX_%s' % class_name], 
+                                   f"{metrics['SCORE_VARIATION_%s' % class_name]:.4f}",
+                                   f"{metrics['TRANSLATION_VARIATION_%s' % class_name]:.4f}",
+                                   f"{metrics['SIZE_VARIATION_%s' % class_name]:.4f}",
+                                   f"{metrics['HEADING_VARIATION_%s' % class_name]:.4f}"])
+    metrics_str += tabulate(metrics_data_print, headers=['class', 'SI', 'score', 
+                                                        'translation', 'size',
+                                                        'heading'], tablefmt='orgtbl')
+
+    # print distance breakdown    
+    metrics_data_print = []                                                    
+    metrics_str += '\n\n----------------------------------\n'
+    metrics_str += f'Stable Index (BreakDown By Distance)'
+    metrics_str += '\n----------------------------------\n'
+    d_metrics = metrics['DISTANCE_BREAKDOWN']
+
+    for class_name in class_names:
+        for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
+            metrics_data_print.append([class_name if idx == 0 else '', 
+                            ['<30', '30-50', '>50'][idx],
+                            f"{d_metrics['STABLE_INDEX_%s_%d' % (class_name, idx)]:.4f}",
+                            f"{d_metrics['SCORE_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
+                            f"{d_metrics['TRANSLATION_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
+                            f"{d_metrics['SIZE_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
+                            f"{d_metrics['HEADING_VARIATION_%s_%d' % (class_name, idx)]:.4f}"])
+        metrics_data_print += '\n'
+    metrics_str += tabulate(metrics_data_print, headers=['class', 'dist.', 'SI', 'score', 
+                                                    'translation', 'size', 'heading'], tablefmt='orgtbl')                            
+
+
+    return metrics_str
 
 
 def main():
@@ -284,21 +383,32 @@ def main():
     pred_infos = pickle.load(open(args.pred_infos, 'rb'))
     gt_infos = pickle.load(open(args.gt_infos, 'rb'))
 
-    # print('Start to evaluate the waymo format results...')
-    # eval = OpenPCDetWaymoDetectionMetricsEstimator()
+    frame_id_mapper = {info['frame_id']: i for i, info in enumerate(gt_infos)}
+    cur_det_annos, pre_det_annos = [], []
+    cur_gt_annos, pre_gt_annos = [], []
+    for i, info in enumerate(gt_infos):
+        sequence_name = info['point_cloud']['lidar_sequence']
+        sample_idx = info['point_cloud']['sample_idx']
+        # filter out frame withous previous information
+        pre_sample_idx = sample_idx - 5
+        pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
+        if pre_frame_idx not in frame_id_mapper:
+            continue
 
-    # gt_infos_dst = []
-    # for idx in range(0, len(gt_infos), args.sampled_interval):
-    #     cur_info = gt_infos[idx]['annos']
-    #     cur_info['frame_id'] = gt_infos[idx]['frame_id']
-    #     gt_infos_dst.append(cur_info)
+        cur_det_annos.append(pred_infos[i])
+        cur_gt_annos.append(gt_infos[i]['annos'])
+        pre_det_annos.append(pred_infos[frame_id_mapper[pre_frame_idx]])
+        pre_gt_annos.append(gt_infos[frame_id_mapper[pre_frame_idx]]['annos'])
 
-    # waymo_AP = eval.waymo_evaluation(
-    #     pred_infos, gt_infos_dst, class_name=args.class_names, distance_thresh=1000, fake_gt_infos=False
-    # )
+    stable_index = eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, args.class_names)
+    stable_index_str = print_metrics(stable_index, args.class_names)
+    print(stable_index_str)
 
-    # print(waymo_AP)
-
+    # save to file
+    log_file = '/'.join(args.pred_infos.split('/')[:-1]) + f'/eval_si_%s.log' %datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    print('Save log file to %s' % log_file)
+    with open(log_file, 'w') as f:
+        f.write(stable_index_str)
 
 if __name__ == '__main__':
     main()

@@ -154,6 +154,20 @@ class WaymoDataset(DatasetTemplate):
         if num_gpus > 1:
             dist.barrier()
         self.logger.info('Training data has been deleted from shared memory')
+    
+    def get_seq_infos(self):
+        seg_infos = []
+        if self._merge_all_iters_to_one_epoch:
+            for e in range(self.total_epochs):
+                for info in self.infos:
+                    pc_info = copy.deepcopy(info['point_cloud'])
+                    pc_info['lidar_sequence'] = pc_info['lidar_sequence'] + '_epoch_%d' % e
+                    seg_infos.append(pc_info)
+        else:
+            for info in self.infos:
+                pc_info = copy.deepcopy(info['point_cloud'])
+                seg_infos.append(pc_info)
+        return seg_infos
 
     @staticmethod
     def check_sequence_name_with_all_version(sequence_file):
@@ -474,11 +488,10 @@ class WaymoDataset(DatasetTemplate):
                 pre_gt_annos.append(eval_gt_annos[frame_id_mapper[pre_frame_idx]])
 
             from .stable_index_eval import eval_stable_index
+            from .stable_index_eval import print_metrics
             ap_dict = eval_stable_index(
                 cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names=class_names)
-            ap_result_str = '\n'
-            for key in ap_dict:
-                ap_result_str += '%s: %.4f \n' % (key, ap_dict[key])
+            ap_result_str = print_metrics(ap_dict, class_names)
         else:
             raise NotImplementedError
 
