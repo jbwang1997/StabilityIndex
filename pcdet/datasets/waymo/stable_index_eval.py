@@ -200,6 +200,9 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos,
     assert len(pre_det_annos) == num_frame_pair
     assert len(cur_gt_annos) == num_frame_pair
     assert len(pre_gt_annos) == num_frame_pair
+    assert align_func in ['max_iou', 'max_score']
+    align_func = align_det_and_gt_by_max_iou if align_func == 'max_iou' \
+        else align_det_and_gt_by_max_score
 
     cur_det_annos = copy.deepcopy(cur_det_annos)
     pre_det_annos = copy.deepcopy(pre_det_annos)
@@ -257,9 +260,6 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos,
             pre_det_boxes3d = pre_det_boxes3d[:, :7]
 
         # align prediction and gt by iou
-        assert align_func in ['max_iou', 'max_score']
-        align_func = align_det_and_gt_by_max_iou if align_func == 'max_iou' \
-            else align_det_and_gt_by_max_score
         cur_det_boxes3d, cur_det_scores = align_func(cur_det_boxes3d, cur_det_scores, cur_det_names,
                                                      cur_gt_boxes3d, gt_names, class_names)
         pre_det_boxes3d, pre_det_scores = align_func(pre_det_boxes3d, pre_det_scores, pre_det_names,
