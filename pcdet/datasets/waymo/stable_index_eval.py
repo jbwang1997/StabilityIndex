@@ -329,6 +329,7 @@ def eval_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos,
             metrics['DISTANCE_BREAKDOWN']['SIZE_VARIATION_%s_%d' % (class_name, idx)] = _size.mean()
             metrics['DISTANCE_BREAKDOWN']['HEADING_VARIATION_%s_%d' % (class_name, idx)] = _heading.mean()
             metrics['DISTANCE_BREAKDOWN']['STABLE_INDEX_%s_%d' % (class_name, idx)] = _stable_index.mean()
+    return metrics
 
 
 def print_metrics(metrics, class_names):
