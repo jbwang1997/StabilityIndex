@@ -199,6 +199,8 @@ class DatasetTemplate(torch_data.Dataset):
             gt_boxes = np.concatenate((data_dict['gt_boxes'], gt_classes.reshape(-1, 1).astype(np.float32)), axis=1)
             data_dict['gt_boxes'] = gt_boxes
 
+            if 'gt_ids' in data_dict:
+                data_dict['gt_ids'] = data_dict['gt_ids'][selected]
             if data_dict.get('gt_boxes2d', None) is not None:
                 data_dict['gt_boxes2d'] = data_dict['gt_boxes2d'][selected]
 
@@ -247,6 +249,13 @@ class DatasetTemplate(torch_data.Dataset):
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
                     for k in range(batch_size):
                         batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['gt_ids']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.dtype('<U22'))
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
                     ret[key] = batch_gt_boxes3d
 
                 elif key in ['roi_boxes']:

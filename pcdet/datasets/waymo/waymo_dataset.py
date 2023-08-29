@@ -14,6 +14,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 from pathlib import Path
 from functools import partial
+from collections import defaultdict
 
 from ...ops.roiaware_pool3d import roiaware_pool3d_utils
 from ...utils import box_utils, common_utils
@@ -155,19 +156,23 @@ class WaymoDataset(DatasetTemplate):
             dist.barrier()
         self.logger.info('Training data has been deleted from shared memory')
     
-    def get_seq_infos(self):
-        seg_infos = []
-        if self._merge_all_iters_to_one_epoch:
-            for e in range(self.total_epochs):
-                for info in self.infos:
-                    pc_info = copy.deepcopy(info['point_cloud'])
-                    pc_info['lidar_sequence'] = pc_info['lidar_sequence'] + '_epoch_%d' % e
-                    seg_infos.append(pc_info)
-        else:
-            for info in self.infos:
-                pc_info = copy.deepcopy(info['point_cloud'])
-                seg_infos.append(pc_info)
-        return seg_infos
+    def group_idx_by_seq(self):
+        seq_collector = defaultdict(list)
+        for i in range(len(self)):
+            info = self.infos[i % len(self.infos)]
+            seq_name = info['point_cloud']['lidar_sequence']
+            sample_idx = info['point_cloud']['sample_idx']
+            seq_collector[seq_name + '_%d' % (i // len(self.infos))].append(
+                dict(sample_idx=sample_idx, index=i))
+        
+        seq_groups = []
+        for seq_name, sample_infos in seq_collector.items():
+            sample_idx = np.array([info['sample_idx'] for info in sample_infos])
+            index = np.array([info['index'] for info in sample_infos])
+            index = index[np.argsort(sample_idx)]
+            seq_groups.append(index.tolist())
+        assert len(self) == sum([len(group) for group in seq_groups])
+        return seq_groups
 
     @staticmethod
     def check_sequence_name_with_all_version(sequence_file):
@@ -409,6 +414,7 @@ class WaymoDataset(DatasetTemplate):
                 annos['name'] = annos['name'][mask]
                 gt_boxes_lidar = gt_boxes_lidar[mask]
                 annos['num_points_in_gt'] = annos['num_points_in_gt'][mask]
+                annos['obj_ids'] = annos['obj_ids'][mask]
 
             input_dict.update({
                 'gt_names': annos['name'],
@@ -416,8 +422,13 @@ class WaymoDataset(DatasetTemplate):
                 'num_points_in_gt': annos.get('num_points_in_gt', None)
             })
 
+            if self.dataset_cfg.get('LOAD_OBJ_IDS', False):
+                input_dict['gt_ids'] = annos['obj_ids']
+
         data_dict = self.prepare_data(data_dict=input_dict)
         data_dict['metadata'] = info.get('metadata', info['frame_id'])
+        if isinstance(data_dict['metadata'], dict) and 'frame_id' not in data_dict['metadata']:
+            data_dict['metadata']['frame_id'] = info['frame_id']
         data_dict.pop('num_points_in_gt', None)
         return data_dict
 

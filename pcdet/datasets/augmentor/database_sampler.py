@@ -366,6 +366,8 @@ class DataBaseSampler(object):
         gt_boxes_mask = data_dict['gt_boxes_mask']
         gt_boxes = data_dict['gt_boxes'][gt_boxes_mask]
         gt_names = data_dict['gt_names'][gt_boxes_mask]
+        if 'gt_ids' in data_dict:
+            gt_ids = data_dict['gt_ids'][gt_boxes_mask]
         points = data_dict['points']
         if self.sampler_cfg.get('USE_ROAD_PLANE', False) and mv_height is None:
             sampled_gt_boxes, mv_height = self.put_boxes_on_road_planes(
@@ -435,6 +437,10 @@ class DataBaseSampler(object):
         gt_boxes = np.concatenate([gt_boxes, sampled_gt_boxes], axis=0)
         data_dict['gt_boxes'] = gt_boxes
         data_dict['gt_names'] = gt_names
+        if 'gt_ids' in data_dict:
+            padding = np.zeros((sampled_gt_names.shape[0]), dtype=np.dtype('<U22'))
+            gt_ids = np.concatenate([gt_ids, padding], axis=0)
+            data_dict['gt_ids'] = gt_ids
         data_dict['points'] = points
 
         if self.img_aug_type is not None:
