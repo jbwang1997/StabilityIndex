@@ -133,5 +133,13 @@ if __name__ == '__main__':
                     'src/ingroup_inds_kernel.cu',
                 ]
             ),
+            make_cuda_ext(
+                name='roi_align_rotated_cuda',
+                module='pcdet.ops.roi_align_rotated',
+                sources=[
+                    'src/ROIAlignRotated_cpu.cpp',
+                    'src/ROIAlignRotated_cuda.cu',
+                ]
+            ),
         ],
     )
