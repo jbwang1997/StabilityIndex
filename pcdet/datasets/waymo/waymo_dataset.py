@@ -360,10 +360,9 @@ class WaymoDataset(DatasetTemplate):
 
         return len(self.infos)
 
-    def __getitem__(self, index):
+    def helper_getitem(self, index):
         if self._merge_all_iters_to_one_epoch:
-            index = index % len(self.infos)
-
+            index = index % len(self.infos)        
         info = copy.deepcopy(self.infos[index])
         pc_info = info['point_cloud']
         sequence_name = pc_info['lidar_sequence']
@@ -431,6 +430,142 @@ class WaymoDataset(DatasetTemplate):
             data_dict['metadata']['frame_id'] = info['frame_id']
         data_dict.pop('num_points_in_gt', None)
         return data_dict
+
+    def __getitem__(self, index):
+        data_dict = self.helper_getitem(index)
+
+        if self.dataset_cfg.get('TWO_STREAM', False):
+            max_itv = self.dataset_cfg.get('TWO_STREAM_MAX_INTERVAL', False)
+            index2 = index + np.random.randint(-max_itv, max_itv + 1)
+            index2 = max(0, min(index2, len(self) - 1))
+            data_dict2 = self.helper_getitem(index2)
+
+            for key, val in data_dict2.items():
+                data_dict[f'{key}_two_stream'] = val
+            del data_dict2
+
+        return data_dict
+
+    @staticmethod
+    def collate_batch(batch_list, _unused=False):
+        data_dict = defaultdict(list)
+
+        batch_size_multiplier = 1
+        for cur_sample in batch_list:
+            for key, val in cur_sample.items():
+                if 'two_stream' not in key:
+                    data_dict[key].append(val)
+            for key, val in cur_sample.items():
+                if 'two_stream' in key:
+                    data_dict[key.replace('_two_stream', '')].append(val)
+
+        batch_size = len(batch_list) * batch_size_multiplier
+        ret = {}
+        batch_size_ratio = 1
+
+        for key, val in data_dict.items():
+            try:
+                if key in ['voxels', 'voxel_num_points']:
+                    if isinstance(val[0], list):
+                        batch_size_ratio = len(val[0])
+                        val = [i for item in val for i in item]
+                    ret[key] = np.concatenate(val, axis=0)
+                elif key in ['points', 'voxel_coords']:
+                    coors = []
+                    if isinstance(val[0], list):
+                        val =  [i for item in val for i in item]
+                    for i, coor in enumerate(val):
+                        coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
+                        coors.append(coor_pad)
+                    ret[key] = np.concatenate(coors, axis=0)
+                elif key in ['gt_boxes']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['gt_ids']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.dtype('<U22'))
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['roi_boxes']:
+                    max_gt = max([x.shape[1] for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, val[0].shape[0], max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k,:, :val[k].shape[1], :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['roi_scores', 'roi_labels']:
+                    max_gt = max([x.shape[1] for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, val[0].shape[0], max_gt), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k,:, :val[k].shape[1]] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['gt_boxes2d']:
+                    max_boxes = 0
+                    max_boxes = max([len(x) for x in val])
+                    batch_boxes2d = np.zeros((batch_size, max_boxes, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        if val[k].size > 0:
+                            batch_boxes2d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_boxes2d
+                elif key in ["images", "depth_maps"]:
+                    # Get largest image size (H, W)
+                    max_h = 0
+                    max_w = 0
+                    for image in val:
+                        max_h = max(max_h, image.shape[0])
+                        max_w = max(max_w, image.shape[1])
+
+                    # Change size of images
+                    images = []
+                    for image in val:
+                        pad_h = common_utils.get_pad_params(desired_size=max_h, cur_size=image.shape[0])
+                        pad_w = common_utils.get_pad_params(desired_size=max_w, cur_size=image.shape[1])
+                        pad_width = (pad_h, pad_w)
+                        pad_value = 0
+
+                        if key == "images":
+                            pad_width = (pad_h, pad_w, (0, 0))
+                        elif key == "depth_maps":
+                            pad_width = (pad_h, pad_w)
+
+                        image_pad = np.pad(image,
+                                           pad_width=pad_width,
+                                           mode='constant',
+                                           constant_values=pad_value)
+
+                        images.append(image_pad)
+                    ret[key] = np.stack(images, axis=0)
+                elif key in ['calib']:
+                    ret[key] = val
+                elif key in ["points_2d"]:
+                    max_len = max([len(_val) for _val in val])
+                    pad_value = 0
+                    points = []
+                    for _points in val:
+                        pad_width = ((0, max_len-len(_points)), (0,0))
+                        points_pad = np.pad(_points,
+                                pad_width=pad_width,
+                                mode='constant',
+                                constant_values=pad_value)
+                        points.append(points_pad)
+                    ret[key] = np.stack(points, axis=0)
+                elif key in ['camera_imgs']:
+                    ret[key] = torch.stack([torch.stack(imgs,dim=0) for imgs in val],dim=0)
+                else:
+                    ret[key] = np.stack(val, axis=0)
+            except:
+                print('Error in collate_batch: key=%s' % key)
+                raise TypeError
+
+        ret['batch_size'] = batch_size * batch_size_ratio
+        return ret
 
     def evaluation(self, det_annos, class_names, **kwargs):
         if 'annos' not in self.infos[0].keys():
@@ -820,6 +955,7 @@ def create_waymo_gt_database(
             used_classes=['Vehicle', 'Pedestrian', 'Cyclist'], processed_data_tag=processed_data_tag
         )
     print('---------------Data preparation Done---------------')
+
 
 
 if __name__ == '__main__':

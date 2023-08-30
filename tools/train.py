@@ -131,6 +131,10 @@ def main():
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
 
+    # double the lr if using two stream data (batch size * 2)
+    if cfg.DATA_CONFIG.get('TWO_STREAM', False):
+        cfg.OPTIMIZATION.LR *= 2
+
     optimizer = build_optimizer(model, cfg.OPTIMIZATION)
 
     # load checkpoint if it is possible
@@ -138,6 +142,10 @@ def main():
     last_epoch = -1
     if args.pretrained_model is not None:
         model.load_params_from_file(filename=args.pretrained_model, to_cpu=dist_train, logger=logger)
+    else:
+        # load from config
+        if cfg.MODEL.get('PRETRAINED', None) != None:
+            model.load_params_from_file(filename=cfg.MODEL.PRETRAINED, to_cpu=dist_train, logger=logger)
 
     if args.ckpt is not None:
         it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=dist_train, optimizer=optimizer, logger=logger)
