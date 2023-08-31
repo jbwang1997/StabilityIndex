@@ -10,8 +10,9 @@ from . import roi_align_rotated_cuda
 class _ROIAlignRotated(Function):
     @staticmethod
     def forward(ctx, input, roi, output_size, spatial_scale, sampling_ratio):
+        output_size = _pair(output_size)
         ctx.save_for_backward(roi)
-        ctx.output_size = _pair(output_size)
+        ctx.output_size = output_size
         ctx.spatial_scale = spatial_scale
         ctx.sampling_ratio = sampling_ratio
         ctx.input_shape = input.size()
