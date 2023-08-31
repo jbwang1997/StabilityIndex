@@ -308,21 +308,22 @@ class CenterGTMatchingHead(nn.Module):
                 paired_feature1 = []
                 paired_feature2 = []
                 for i in range(0, batch_size, 2):
-                    batch_features1 = gt_features[batch_ids == i]
-                    batch_features2 = gt_features[batch_ids == i+1]
-                    batch_ids1 = gt_ids[(batch_ids == i).cpu().numpy()]
-                    batch_ids2 = gt_ids[(batch_ids == i+1).cpu().numpy()]
-                    paird_idx1, paird_idx2 = np.nonzero(batch_ids1[:, None] == batch_ids2)
-                    paired_feature1.append(batch_features1[paird_idx1])
-                    paired_feature2.append(batch_features2[paird_idx2])
+                    features1 = gt_features[batch_ids == i]
+                    features2 = gt_features[batch_ids == i+1]
+                    gt_ids1 = gt_ids[(batch_ids == i).cpu().numpy()]
+                    gt_ids2 = gt_ids[(batch_ids == i+1).cpu().numpy()]
+                    paired_idx1, paired_idx2 = np.nonzero(gt_ids1[:, None] == gt_ids2)
+                    paired_feature1.append(features1[paired_idx1])
+                    paired_feature2.append(features2[paired_idx2])
                 paired_feature1 = torch.cat(paired_feature1, dim=0)
                 paired_feature2 = torch.cat(paired_feature2, dim=0)
                 mean_features = ((paired_feature1 + paired_feature2) / 2).detach()
 
                 pred_features = torch.cat([paired_feature1, paired_feature2], dim=0)
                 target_features = torch.cat([mean_features, mean_features], dim=0)
-                gt_matching_loss = self.gt_matching_loss(pred_features, target_features) * self.gt_matching_loss_weight
-                loss += gt_matching_loss
+                if pred_features.shape[0] != 0:
+                    loss += self.gt_matching_loss(
+                        pred_features, target_features) * self.gt_matching_loss_weight
 
         tb_dict['rpn_loss'] = loss.item()
         return loss, tb_dict
