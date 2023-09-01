@@ -434,7 +434,7 @@ class WaymoDataset(DatasetTemplate):
     def __getitem__(self, index):
         data_dict = self.helper_getitem(index)
 
-        if self.dataset_cfg.get('TWO_STREAM', False):
+        if self.dataset_cfg.get('TWO_STREAM', False) and self.training:
             max_itv = self.dataset_cfg.get('TWO_STREAM_MAX_INTERVAL', False)
             index2 = index + np.random.randint(-max_itv, max_itv + 1)
             index2 = max(0, min(index2, len(self) - 1))

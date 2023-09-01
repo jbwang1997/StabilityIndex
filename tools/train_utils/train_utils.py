@@ -115,7 +115,16 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
                             batch_time=batch_time
                             )
                     )
-                    
+
+                    # Detailed logging on each loss.
+                    losses_str = ""
+                    for loss_name, loss_value in tb_dict.items():
+                        if type(loss_value) is float:
+                            losses_str += "{name}: {loss:.3g} ".format(name=loss_name, loss=loss_value)
+                        else:
+                            losses_str += "{name}: {loss:.3g} ".format(name=loss_name, loss=loss_value.item())
+                    logger.info("Detailed Loss: " + losses_str)
+
                     if show_gpu_stat and accumulated_iter % (3 * logger_iter_interval) == 0:
                         # To show the GPU utilization, please install gpustat through "pip install gpustat"
                         gpu_info = os.popen('gpustat').read()
