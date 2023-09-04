@@ -170,7 +170,7 @@ class CenterGTMatchingHead(nn.Module):
 
         return heatmap, ret_boxes, inds, mask, ret_boxes_src
 
-    def assign_targets(self, gt_boxes, feature_map_size=None, **kwargs):
+    def assign_targets(self, gt_boxes, feature_map_size=None, gt_ids=None, **kwargs):
         """
         Args:
             gt_boxes: (B, M, 8)
@@ -192,16 +192,20 @@ class CenterGTMatchingHead(nn.Module):
             'masks': [],
             'heatmap_masks': [],
             'target_boxes_src': [],
+            'gt_ids': [],
         }
 
         all_names = np.array(['bg', *self.class_names])
         for idx, cur_class_names in enumerate(self.class_names_each_head):
             heatmap_list, target_boxes_list, inds_list, masks_list, target_boxes_src_list = [], [], [], [], []
+            gt_ids_list = []
             for bs_idx in range(batch_size):
                 cur_gt_boxes = gt_boxes[bs_idx]
+                cur_gt_ids = gt_ids[bs_idx] if gt_ids is not None else None
                 gt_class_names = all_names[cur_gt_boxes[:, -1].cpu().long().numpy()]
 
                 gt_boxes_single_head = []
+                gt_ids_single_head = []
 
                 for idx, name in enumerate(gt_class_names):
                     if name not in cur_class_names:
@@ -209,6 +213,8 @@ class CenterGTMatchingHead(nn.Module):
                     temp_box = cur_gt_boxes[idx]
                     temp_box[-1] = cur_class_names.index(name) + 1
                     gt_boxes_single_head.append(temp_box[None, :])
+                    if gt_ids is not None:
+                        gt_ids_single_head.append(cur_gt_ids[idx])
 
                 if len(gt_boxes_single_head) == 0:
                     gt_boxes_single_head = cur_gt_boxes[:0, :]
@@ -227,24 +233,73 @@ class CenterGTMatchingHead(nn.Module):
                 inds_list.append(inds.to(gt_boxes_single_head.device))
                 masks_list.append(mask.to(gt_boxes_single_head.device))
                 target_boxes_src_list.append(ret_boxes_src.to(gt_boxes_single_head.device))
+                if gt_ids is not None:
+                    gt_ids_list.append(gt_ids_single_head)
 
             ret_dict['heatmaps'].append(torch.stack(heatmap_list, dim=0))
             ret_dict['target_boxes'].append(torch.stack(target_boxes_list, dim=0))
             ret_dict['inds'].append(torch.stack(inds_list, dim=0))
             ret_dict['masks'].append(torch.stack(masks_list, dim=0))
             ret_dict['target_boxes_src'].append(torch.stack(target_boxes_src_list, dim=0))
+            ret_dict['gt_ids'].append(gt_ids_list)
         return ret_dict
 
     def sigmoid(self, x):
         y = torch.clamp(x.sigmoid(), min=1e-4, max=1 - 1e-4)
         return y
 
+    @staticmethod
+    def trans_box_by_matrix(box, trans_matrix=None):
+        """ Transform the box back to the original space
+           @ box: (B, 7) [x, y, z, dx, dy, dz, rot]
+           @ trans_matrix: (4, 4)
+
+           rot is the angle between the box and the x axis
+        """
+        if trans_matrix is None: return box
+        matrix = torch.inverse(trans_matrix)
+
+        # translate box center
+        center = box[:, :3]
+        center = torch.cat([center, center.new_ones(center.shape[0], 1)], dim=1)
+        center = torch.matmul(center, matrix.t())
+        recovered_center = center[:, :3]
+
+        # translate the box size
+        scale = torch.norm(matrix[0, :3], dim=0)
+        recovered_dim = box[:, 3:6] * scale
+
+        # rotate the box
+        rot = box[:, 6:]
+        fake_x, fake_y = torch.cos(rot), torch.sin(rot)
+        fake_points = torch.cat([fake_x, fake_y, rot.new_ones(rot.shape[0], 2)], dim=1)
+        # a dummy point of [0, 0, 1, 1]
+        pivot = torch.cat([rot.new_zeros(1, 2), rot.new_ones(1, 2)], dim=1)
+        pivot = torch.matmul(pivot, matrix.t())
+        fake_points = torch.matmul(fake_points, matrix.t())
+        fake_x_t, fake_y_t = fake_points[:, 0] - pivot[:, 0], fake_points[:, 1] - pivot[:, 1]
+        recovered_rot = torch.atan2(fake_x_t, fake_y_t)
+
+        recovered_box = torch.cat([recovered_center, recovered_dim, recovered_rot[:, None]], dim=1)
+        return recovered_box
+    
+    def trans_box_by_matrix_batch(self, boxes, trans_matrix):
+        batch_size = boxes.shape[0]
+        output = []
+        for i in range(batch_size):
+            output.append(self.trans_box_by_matrix(boxes[i], trans_matrix[i]))
+        return torch.stack(output, dim=0)
+
     def get_loss(self):
         pred_dicts = self.forward_ret_dict['pred_dicts']
         target_dicts = self.forward_ret_dict['target_dicts']
 
         tb_dict = {}
-        loss = 0
+        loss = 0.0
+        loss_feat_matching = 0.0
+
+        batch_size = pred_dicts[0]['dim'].size(0)
+        lidar_aug_matrix = target_dicts['lidar_aug_matrix']
 
         for idx, pred_dict in enumerate(pred_dicts):
             pred_dict['hm'] = self.sigmoid(pred_dict['hm'])
@@ -265,7 +320,6 @@ class CenterGTMatchingHead(nn.Module):
             tb_dict['loc_loss_head_%d' % idx] = loc_loss.item()
 
             if 'iou' in pred_dict or self.model_cfg.get('IOU_REG_LOSS', False):
-
                 batch_box_preds = centernet_utils.decode_bbox_from_pred_dicts(
                     pred_dict=pred_dict,
                     point_cloud_range=self.point_cloud_range, voxel_size=self.voxel_size,
@@ -297,12 +351,92 @@ class CenterGTMatchingHead(nn.Module):
                     else:
                         loss += (batch_box_preds_for_iou * 0.).sum()
                         tb_dict['iou_reg_loss_head_%d' % idx] = (batch_box_preds_for_iou * 0.).sum()
-        
+
+            # get the matching loss, update to tb_dict and sum to loss
+            alignment = self.model_cfg.get('ALIGNMENT', None)
+            if alignment is not None and alignment.get('ENABLE', False):
+                loss_weight = alignment.get('LOSS_WEIGHT', [0, 0, 0, 0])
+                assert len(loss_weight) == 4, 'loss_weight should be a list with length 4'
+
+                for idx, pred_dict in enumerate(pred_dicts):
+                    ind = target_dicts['inds'][idx] # indexes to gather infos
+
+                    # heatmaps
+                    # make sure pred_dict['hm'] is already processed by sigmoid
+                    assert pred_dict['hm'].max() <= 1 and pred_dict['hm'].min() >= 0
+                    pred_hm, target_hm = pred_dict['hm'], target_dicts['heatmaps'][idx]
+                    pred_hm = pred_hm.gather(1, target_hm.argmax(dim=1).unsqueeze(1)).squeeze(1)
+                    pred_hm = pred_hm.reshape(batch_size, -1)
+                    score_preds = pred_hm.gather(1, ind)
+
+                    # boxes
+                    target_boxes_src = target_dicts['target_boxes_src'][idx][..., :-1]
+                    batch_box_preds = centernet_utils.decode_bbox_from_pred_dicts(
+                        pred_dict=pred_dict,
+                        point_cloud_range=self.point_cloud_range, voxel_size=self.voxel_size,
+                        feature_map_stride=self.feature_map_stride
+                    )  # (B, H, W, 7 or 9)
+                    box_preds = batch_box_preds.reshape(batch_size, -1, batch_box_preds.shape[-1])
+                    box_preds = box_preds.gather(1, ind.unsqueeze(2).expand(ind.size(0), ind.size(1), box_preds.size(2)))
+
+                    recovered_target_boxes = self.trans_box_by_matrix_batch(target_boxes_src, lidar_aug_matrix)
+                    recovered_box_preds = self.trans_box_by_matrix_batch(box_preds, lidar_aug_matrix)
+
+                    ### (irving) remember to check this when using a new aug / a new dataset
+                    ### currently, the rotation angle is between the box and the x axis
+                    # check_err = (recovered_target_boxes[0, :10] - recovered_target_boxes[1, :10]).max()
+                    # if check_err > 1e-3:
+                    #     raise ValueError('The recovered target boxes are not the same')
+
+                    si_cls_loss, si_reg_loss = 0.0, 0.0
+                    gt_ids = target_dicts['gt_ids'][idx]
+                    for i in range(0, batch_size, 2):
+                        gt_ids1, gt_ids2 = np.array(gt_ids[i]), np.array(gt_ids[i+1])
+                        paired_idx1, paired_idx2 = np.nonzero(gt_ids1[:, None] == gt_ids2)
+                        paired_idx1 = [idx for idx in paired_idx1 if len(gt_ids1[idx]) > 0]
+                        paired_idx2 = [idx for idx in paired_idx2 if len(gt_ids2[idx]) > 0]
+
+                        assert len(paired_idx1) == len(paired_idx2), 'The number of paired boxes should be the same'
+                        if len(paired_idx1) == 0:
+                            continue
+
+                        # score losses
+                        score_preds1, score_preds2 = score_preds[i][paired_idx1], score_preds[i+1][paired_idx2]
+                        si_cls_loss += self.gt_matching_loss(score_preds1, score_preds2) * loss_weight[0]
+                        
+                        # reg losses
+                        box_preds1, box_preds2 = recovered_box_preds[i][paired_idx1], recovered_box_preds[i+1][paired_idx2]
+                        box_gts1, box_gts2 = recovered_target_boxes[i][paired_idx1], recovered_target_boxes[i+1][paired_idx2]
+
+                        diff_loc1, diff_loc2 = box_preds1[:, :3] - box_gts1[:, :3], box_preds2[:, :3] - box_gts2[:, :3]
+                        diff_dim1, diff_dim2 = box_preds1[:, 3:6] / box_gts1[:, 3:6], box_preds2[:, 3:6] / box_gts2[:, 3:6]
+                        diff_rot1 = torch.stack([torch.sin(box_preds1[:, 6]) - torch.sin(box_gts1[:, 6]), 
+                                                 torch.cos(box_preds1[:, 6]) - torch.cos(box_gts1[:, 6])])
+                        diff_rot2 = torch.stack([torch.sin(box_preds2[:, 6]) - torch.sin(box_gts2[:, 6]), 
+                                                 torch.cos(box_preds2[:, 6]) - torch.cos(box_gts2[:, 6])])
+
+                        diff_loc1 = torch.stack([diff_loc1[:, 0] * torch.cos(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.sin(box_gts1[:, 6]),
+                                                -diff_loc1[:, 0] * torch.sin(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.cos(box_gts1[:, 6]),
+                                                diff_loc1[:, 2]], dim=1)
+
+                        diff_loc2 = torch.stack([diff_loc2[:, 0] * torch.cos(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.sin(box_gts2[:, 6]),
+                                                -diff_loc2[:, 0] * torch.sin(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.cos(box_gts2[:, 6]),
+                                                diff_loc2[:, 2]], dim=1)
+
+                        si_reg_loss += self.gt_matching_loss(diff_loc1, diff_loc2) * loss_weight[1]
+                        si_reg_loss += self.gt_matching_loss(diff_dim1, diff_dim2) * loss_weight[2]
+                        si_reg_loss += self.gt_matching_loss(diff_rot1, diff_rot2) * loss_weight[3]
+
+                    loss += si_cls_loss + si_reg_loss
+                    tb_dict['SI_cls_loss_head_%d' % idx] = si_cls_loss.item() if isinstance(si_cls_loss, torch.Tensor) else si_cls_loss
+                    tb_dict['SI_reg_loss_head_%d' % idx] = si_reg_loss.item() if isinstance(si_reg_loss, torch.Tensor) else si_reg_loss
+
+        # feature matching loss
         if 'gt_matching_dict' in self.forward_ret_dict:
             gt_features = self.forward_ret_dict['gt_matching_dict']['gt_features']
             gt_ids = self.forward_ret_dict['gt_matching_dict']['gt_ids']
             batch_ids = self.forward_ret_dict['gt_matching_dict']['batch_ids']
-            batch_size = self.forward_ret_dict['gt_matching_dict']['batch_size']
+            # batch_size = self.forward_ret_dict['gt_matching_dict']['batch_size']
 
             if gt_features.shape[0] != 0:
                 paired_feature1 = []
@@ -322,8 +456,12 @@ class CenterGTMatchingHead(nn.Module):
                 pred_features = torch.cat([paired_feature1, paired_feature2], dim=0)
                 target_features = torch.cat([mean_features, mean_features], dim=0)
                 if pred_features.shape[0] != 0:
-                    loss += self.gt_matching_loss(
+                    loss_feat_matching += self.gt_matching_loss(
                         pred_features, target_features) * self.gt_matching_loss_weight
+
+        # if loss_feat_matching is tensor
+        tb_dict['gt_matching_loss'] = loss_feat_matching.item() if isinstance(loss_feat_matching, torch.Tensor) else loss_feat_matching
+        loss += loss_feat_matching 
 
         tb_dict['rpn_loss'] = loss.item()
         return loss, tb_dict
@@ -427,8 +565,10 @@ class CenterGTMatchingHead(nn.Module):
         if self.training:
             target_dict = self.assign_targets(
                 data_dict['gt_boxes'], feature_map_size=spatial_features_2d.size()[2:],
-                feature_map_stride=data_dict.get('spatial_features_2d_strides', None)
+                feature_map_stride=data_dict.get('spatial_features_2d_strides', None),
+                gt_ids=data_dict.get('gt_ids', None),
             )
+            target_dict['lidar_aug_matrix'] = data_dict.get('lidar_aug_matrix', None)
             self.forward_ret_dict['target_dicts'] = target_dict
 
             if self.model_cfg.get('GT_MATCHING_CFG', None) is not None:

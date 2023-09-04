@@ -458,6 +458,7 @@ class WaymoDataset(DatasetTemplate):
             for key, val in cur_sample.items():
                 if 'two_stream' in key:
                     data_dict[key.replace('_two_stream', '')].append(val)
+                    batch_size_multiplier = 2
 
         batch_size = len(batch_list) * batch_size_multiplier
         ret = {}
