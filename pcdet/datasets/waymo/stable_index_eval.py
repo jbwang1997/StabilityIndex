@@ -16,15 +16,27 @@ MAX_IOU_BATCH = 100000
 def get_translation_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
     det_boxes1 = torch.from_numpy(det_boxes1).float().cuda()
     det_boxes2 = torch.from_numpy(det_boxes2).float().cuda()
+    gt_boxes1 = torch.from_numpy(gt_boxes1).float().cuda()
+    gt_boxes2 = torch.from_numpy(gt_boxes2).float().cuda()
 
-    translations = gt_boxes2[:, :3] - gt_boxes1[:, :3]
-    translations = torch.from_numpy(translations).float().cuda()
-    det_boxes1_ = det_boxes1.clone()
-    det_boxes1_[:, :3] = det_boxes1_[:, :3] + translations
-    det_boxes1_[:, 3:] = det_boxes2[:, 3:]
-    det_boxes2_ = det_boxes2.clone()
-    det_boxes2_[:, :3] = det_boxes2_[:, :3] - translations
-    det_boxes2_[:, 3:] = det_boxes1[:, 3:]
+    angle_diff = det_boxes2[:, 6] - det_boxes1[:, 6]
+    Cos, Sin = torch.cos(angle_diff), torch.sin(angle_diff)
+    One, Zero = torch.ones_like(angle_diff), torch.zeros_like(angle_diff)
+    rot_matrix = torch.stack([Cos, -Sin, Zero, 
+                              Sin, Cos, Zero, 
+                              Zero, Zero, One], dim=1).view(-1, 3, 3)
+    rot_matrix_ = torch.stack([Cos, Sin, Zero, 
+                               -Sin, Cos, Zero,
+                               Zero, Zero, One], dim=1).view(-1, 3, 3)
+    diff1 = det_boxes1[:, :3] - gt_boxes1[:, :3]
+    rot_diff1 = torch.bmm(rot_matrix, diff1[:, :, None]).squeeze(-1)
+    diff2 = det_boxes2[:, :3] - gt_boxes2[:, :3]
+    rot_diff2 = torch.bmm(rot_matrix_, diff2[:, :, None]).squeeze(-1)
+
+    det_boxes1_ = det_boxes2.clone()
+    det_boxes1_[:, :3] = rot_diff1 + det_boxes1_[:, :3]
+    det_boxes2_ = det_boxes1.clone()
+    det_boxes2_[:, :3] = rot_diff2 + det_boxes2_[:, :3]
 
     num_boxes = det_boxes1.shape[0]
     ious = []
@@ -75,22 +87,7 @@ def get_size_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
 
 def get_heading_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
     det_boxes1 = torch.from_numpy(det_boxes1).float().cuda()
-    mask = (det_boxes1[:, 3:5].max(dim=1)[0] / det_boxes1[:, 3:5].min(dim=1)[0]) < 2
-    det_boxes1[mask, 3] = torch.where(
-        det_boxes1[mask, 3] > det_boxes1[mask, 4],
-        det_boxes1[mask, 4] * 2, det_boxes1[mask, 3])
-    det_boxes1[mask, 4] = torch.where(
-        det_boxes1[mask, 3] > det_boxes1[mask, 4],
-        det_boxes1[mask, 4], det_boxes1[mask, 3] * 2)
-
     det_boxes2 = torch.from_numpy(det_boxes2).float().cuda()
-    mask = (det_boxes2[:, 3:5].max(dim=1)[0] / det_boxes2[:, 3:5].min(dim=1)[0]) < 2
-    det_boxes2[mask, 3] = torch.where(
-        det_boxes2[mask, 3] > det_boxes2[mask, 4],
-        det_boxes2[mask, 4] * 2, det_boxes2[mask, 3])
-    det_boxes2[mask, 4] = torch.where(
-        det_boxes2[mask, 3] > det_boxes2[mask, 4],
-        det_boxes2[mask, 4], det_boxes2[mask, 3] * 2)
 
     rotation = gt_boxes2[:, 6] - gt_boxes1[:, 6]
     rotation = torch.from_numpy(rotation).float().cuda()
@@ -112,6 +109,9 @@ def get_heading_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
         ious.append((ious1 + ious2) / 2)
     
     ious = torch.cat(ious)
+    angle_diff = torch.abs(det_boxes1[:, 6] - det_boxes2[:, 6])
+    angle_diff = torch.minimum(angle_diff, 2 * np.pi - angle_diff)
+    ious[angle_diff > np.pi / 4] = 0
     assert ious.shape[0] == num_boxes
     return ious.cpu().numpy()[:, 0]
 
