@@ -109,7 +109,7 @@ def get_heading_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
         ious.append((ious1 + ious2) / 2)
     
     ious = torch.cat(ious)
-    angle_diff = torch.abs(det_boxes1[:, 6] - det_boxes2[:, 6])
+    angle_diff = torch.abs(det_boxes1[:, 6] - det_boxes2[:, 6]) % (2 * np.pi)
     angle_diff = torch.minimum(angle_diff, 2 * np.pi - angle_diff)
     ious[angle_diff > np.pi / 4] = 0
     assert ious.shape[0] == num_boxes
