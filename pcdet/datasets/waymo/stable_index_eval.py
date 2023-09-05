@@ -19,7 +19,7 @@ def get_translation_variation(det_boxes1, det_boxes2, gt_boxes1, gt_boxes2):
     gt_boxes1 = torch.from_numpy(gt_boxes1).float().cuda()
     gt_boxes2 = torch.from_numpy(gt_boxes2).float().cuda()
 
-    angle_diff = det_boxes2[:, 6] - det_boxes1[:, 6]
+    angle_diff = gt_boxes2[:, 6] - gt_boxes1[:, 6]
     Cos, Sin = torch.cos(angle_diff), torch.sin(angle_diff)
     One, Zero = torch.ones_like(angle_diff), torch.zeros_like(angle_diff)
     rot_matrix = torch.stack([Cos, -Sin, Zero, 
