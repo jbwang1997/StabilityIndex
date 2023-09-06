@@ -249,15 +249,16 @@ class CenterGTMatchingHead(nn.Module):
         return y
 
     @staticmethod
-    def trans_box_by_matrix(box, trans_matrix=None):
+    def trans_box_by_matrix(box, matrix=None):
         """ Transform the box back to the original space
            @ box: (B, 7) [x, y, z, dx, dy, dz, rot]
            @ trans_matrix: (4, 4)
 
            rot is the angle between the box and the x axis
         """
-        if trans_matrix is None: return box
-        matrix = torch.inverse(trans_matrix)
+        # if trans_matrix is None: return box
+        # matrix = torch.inverse(trans_matrix)
+        if matrix is None: return box
 
         # translate box center
         center = box[:, :3]
@@ -352,84 +353,85 @@ class CenterGTMatchingHead(nn.Module):
                         loss += (batch_box_preds_for_iou * 0.).sum()
                         tb_dict['iou_reg_loss_head_%d' % idx] = (batch_box_preds_for_iou * 0.).sum()
 
-            # get the matching loss, update to tb_dict and sum to loss
-            alignment = self.model_cfg.get('ALIGNMENT', None)
-            if alignment is not None and alignment.get('ENABLE', False):
-                loss_weight = alignment.get('LOSS_WEIGHT', [0, 0, 0, 0])
-                assert len(loss_weight) == 4, 'loss_weight should be a list with length 4'
+        # get the matching loss, update to tb_dict and sum to loss
+        alignment = self.model_cfg.get('ALIGNMENT', None)
+        if alignment is not None and alignment.get('ENABLE', False):
+            loss_weight = alignment.get('LOSS_WEIGHT', [0, 0, 0, 0])
+            assert len(loss_weight) == 4, 'loss_weight should be a list with length 4'
 
-                for idx, pred_dict in enumerate(pred_dicts):
-                    ind = target_dicts['inds'][idx] # indexes to gather infos
+            for idx, pred_dict in enumerate(pred_dicts):
+                ind = target_dicts['inds'][idx] # indexes to gather infos
 
-                    # heatmaps
-                    # make sure pred_dict['hm'] is already processed by sigmoid
-                    assert pred_dict['hm'].max() <= 1 and pred_dict['hm'].min() >= 0
-                    pred_hm, target_hm = pred_dict['hm'], target_dicts['heatmaps'][idx]
-                    pred_hm = pred_hm.gather(1, target_hm.argmax(dim=1).unsqueeze(1)).squeeze(1)
-                    pred_hm = pred_hm.reshape(batch_size, -1)
-                    score_preds = pred_hm.gather(1, ind)
+                # heatmaps
+                # make sure pred_dict['hm'] is already processed by sigmoid
+                assert pred_dict['hm'].max() <= 1 and pred_dict['hm'].min() >= 0
+                pred_hm, target_hm = pred_dict['hm'], target_dicts['heatmaps'][idx]
+                pred_hm = pred_hm.gather(1, target_hm.argmax(dim=1).unsqueeze(1)).squeeze(1)
+                pred_hm = pred_hm.reshape(batch_size, -1)
+                score_preds = pred_hm.gather(1, ind)
 
-                    # boxes
-                    target_boxes_src = target_dicts['target_boxes_src'][idx][..., :-1]
-                    batch_box_preds = centernet_utils.decode_bbox_from_pred_dicts(
-                        pred_dict=pred_dict,
-                        point_cloud_range=self.point_cloud_range, voxel_size=self.voxel_size,
-                        feature_map_stride=self.feature_map_stride
-                    )  # (B, H, W, 7 or 9)
-                    box_preds = batch_box_preds.reshape(batch_size, -1, batch_box_preds.shape[-1])
-                    box_preds = box_preds.gather(1, ind.unsqueeze(2).expand(ind.size(0), ind.size(1), box_preds.size(2)))
+                # boxes
+                target_boxes_src = target_dicts['target_boxes_src'][idx][..., :-1]
+                batch_box_preds = centernet_utils.decode_bbox_from_pred_dicts(
+                    pred_dict=pred_dict,
+                    point_cloud_range=self.point_cloud_range, voxel_size=self.voxel_size,
+                    feature_map_stride=self.feature_map_stride
+                )  # (B, H, W, 7 or 9)
+                box_preds = batch_box_preds.reshape(batch_size, -1, batch_box_preds.shape[-1])
+                box_preds = box_preds.gather(1, ind.unsqueeze(2).expand(ind.size(0), ind.size(1), box_preds.size(2)))
 
-                    recovered_target_boxes = self.trans_box_by_matrix_batch(target_boxes_src, lidar_aug_matrix)
-                    recovered_box_preds = self.trans_box_by_matrix_batch(box_preds, lidar_aug_matrix)
+                inverse_lidar_aug_matrix = torch.inverse(lidar_aug_matrix)
+                recovered_target_boxes = self.trans_box_by_matrix_batch(target_boxes_src, inverse_lidar_aug_matrix)
+                recovered_box_preds = self.trans_box_by_matrix_batch(box_preds, inverse_lidar_aug_matrix)
 
-                    ### (irving) remember to check this when using a new aug / a new dataset
-                    ### currently, the rotation angle is between the box and the x axis
-                    # check_err = (recovered_target_boxes[0, :10] - recovered_target_boxes[1, :10]).max()
-                    # if check_err > 1e-3:
-                    #     raise ValueError('The recovered target boxes are not the same')
+                ### (irving) remember to check this when using a new aug / a new dataset
+                ### currently, the rotation angle is between the box and the x axis
+                # check_err = (recovered_target_boxes[0, :10] - recovered_target_boxes[1, :10]).max()
+                # if check_err > 1e-3:
+                #     raise ValueError('The recovered target boxes are not the same')
 
-                    si_cls_loss, si_reg_loss = 0.0, 0.0
-                    gt_ids = target_dicts['gt_ids'][idx]
-                    for i in range(0, batch_size, 2):
-                        gt_ids1, gt_ids2 = np.array(gt_ids[i]), np.array(gt_ids[i+1])
-                        paired_idx1, paired_idx2 = np.nonzero(gt_ids1[:, None] == gt_ids2)
-                        paired_idx1 = [idx for idx in paired_idx1 if len(gt_ids1[idx]) > 0]
-                        paired_idx2 = [idx for idx in paired_idx2 if len(gt_ids2[idx]) > 0]
+                si_cls_loss, si_reg_loss = 0.0, 0.0
+                gt_ids = target_dicts['gt_ids'][idx]
+                for i in range(0, batch_size, 2):
+                    gt_ids1, gt_ids2 = np.array(gt_ids[i]), np.array(gt_ids[i+1])
+                    paired_idx1, paired_idx2 = np.nonzero(gt_ids1[:, None] == gt_ids2)
+                    paired_idx1 = [idx for idx in paired_idx1 if len(gt_ids1[idx]) > 0]
+                    paired_idx2 = [idx for idx in paired_idx2 if len(gt_ids2[idx]) > 0]
 
-                        assert len(paired_idx1) == len(paired_idx2), 'The number of paired boxes should be the same'
-                        if len(paired_idx1) == 0:
-                            continue
+                    assert len(paired_idx1) == len(paired_idx2), 'The number of paired boxes should be the same'
+                    if len(paired_idx1) == 0:
+                        continue
 
-                        # score losses
-                        score_preds1, score_preds2 = score_preds[i][paired_idx1], score_preds[i+1][paired_idx2]
-                        si_cls_loss += self.gt_matching_loss(score_preds1, score_preds2) * loss_weight[0]
-                        
-                        # reg losses
-                        box_preds1, box_preds2 = recovered_box_preds[i][paired_idx1], recovered_box_preds[i+1][paired_idx2]
-                        box_gts1, box_gts2 = recovered_target_boxes[i][paired_idx1], recovered_target_boxes[i+1][paired_idx2]
+                    # score losses
+                    score_preds1, score_preds2 = score_preds[i][paired_idx1], score_preds[i+1][paired_idx2]
+                    si_cls_loss += self.gt_matching_loss(score_preds1, score_preds2) * loss_weight[0]
+                    
+                    # reg losses
+                    box_preds1, box_preds2 = recovered_box_preds[i][paired_idx1], recovered_box_preds[i+1][paired_idx2]
+                    box_gts1, box_gts2 = recovered_target_boxes[i][paired_idx1], recovered_target_boxes[i+1][paired_idx2]
 
-                        diff_loc1, diff_loc2 = box_preds1[:, :3] - box_gts1[:, :3], box_preds2[:, :3] - box_gts2[:, :3]
-                        diff_dim1, diff_dim2 = box_preds1[:, 3:6] / box_gts1[:, 3:6], box_preds2[:, 3:6] / box_gts2[:, 3:6]
-                        diff_rot1 = torch.stack([torch.sin(box_preds1[:, 6]) - torch.sin(box_gts1[:, 6]), 
-                                                 torch.cos(box_preds1[:, 6]) - torch.cos(box_gts1[:, 6])])
-                        diff_rot2 = torch.stack([torch.sin(box_preds2[:, 6]) - torch.sin(box_gts2[:, 6]), 
-                                                 torch.cos(box_preds2[:, 6]) - torch.cos(box_gts2[:, 6])])
+                    diff_loc1, diff_loc2 = box_preds1[:, :3] - box_gts1[:, :3], box_preds2[:, :3] - box_gts2[:, :3]
+                    diff_dim1, diff_dim2 = box_preds1[:, 3:6] / box_gts1[:, 3:6], box_preds2[:, 3:6] / box_gts2[:, 3:6]
+                    diff_rot1 = torch.stack([torch.sin(box_preds1[:, 6]) - torch.sin(box_gts1[:, 6]), 
+                                                torch.cos(box_preds1[:, 6]) - torch.cos(box_gts1[:, 6])])
+                    diff_rot2 = torch.stack([torch.sin(box_preds2[:, 6]) - torch.sin(box_gts2[:, 6]), 
+                                                torch.cos(box_preds2[:, 6]) - torch.cos(box_gts2[:, 6])])
 
-                        diff_loc1 = torch.stack([diff_loc1[:, 0] * torch.cos(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.sin(box_gts1[:, 6]),
-                                                -diff_loc1[:, 0] * torch.sin(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.cos(box_gts1[:, 6]),
-                                                diff_loc1[:, 2]], dim=1)
+                    diff_loc1 = torch.stack([diff_loc1[:, 0] * torch.cos(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.sin(box_gts1[:, 6]),
+                                            -diff_loc1[:, 0] * torch.sin(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.cos(box_gts1[:, 6]),
+                                            diff_loc1[:, 2]], dim=1)
 
-                        diff_loc2 = torch.stack([diff_loc2[:, 0] * torch.cos(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.sin(box_gts2[:, 6]),
-                                                -diff_loc2[:, 0] * torch.sin(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.cos(box_gts2[:, 6]),
-                                                diff_loc2[:, 2]], dim=1)
+                    diff_loc2 = torch.stack([diff_loc2[:, 0] * torch.cos(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.sin(box_gts2[:, 6]),
+                                            -diff_loc2[:, 0] * torch.sin(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.cos(box_gts2[:, 6]),
+                                            diff_loc2[:, 2]], dim=1)
 
-                        si_reg_loss += self.gt_matching_loss(diff_loc1, diff_loc2) * loss_weight[1]
-                        si_reg_loss += self.gt_matching_loss(diff_dim1, diff_dim2) * loss_weight[2]
-                        si_reg_loss += self.gt_matching_loss(diff_rot1, diff_rot2) * loss_weight[3]
+                    si_reg_loss += self.gt_matching_loss(diff_loc1, diff_loc2) * loss_weight[1]
+                    si_reg_loss += self.gt_matching_loss(diff_dim1, diff_dim2) * loss_weight[2]
+                    si_reg_loss += self.gt_matching_loss(diff_rot1, diff_rot2) * loss_weight[3]
 
-                    loss += si_cls_loss + si_reg_loss
-                    tb_dict['SI_cls_loss_head_%d' % idx] = si_cls_loss.item() if isinstance(si_cls_loss, torch.Tensor) else si_cls_loss
-                    tb_dict['SI_reg_loss_head_%d' % idx] = si_reg_loss.item() if isinstance(si_reg_loss, torch.Tensor) else si_reg_loss
+                loss += si_cls_loss + si_reg_loss
+                tb_dict['SI_cls_loss_head_%d' % idx] = si_cls_loss.item() if isinstance(si_cls_loss, torch.Tensor) else si_cls_loss
+                tb_dict['SI_reg_loss_head_%d' % idx] = si_reg_loss.item() if isinstance(si_reg_loss, torch.Tensor) else si_reg_loss
 
         # feature matching loss
         if 'gt_matching_dict' in self.forward_ret_dict:
