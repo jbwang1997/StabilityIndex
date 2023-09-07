@@ -103,6 +103,9 @@ class CenterGTMatchingHead(nn.Module):
                 GT_MATCHING_CFG.ROI_SIZE, 1 / self.feature_map_stride, GT_MATCHING_CFG.SAMPLING_RATIO)
             self.gt_matching_loss = nn.MSELoss(reduction='mean')
             self.gt_matching_loss_weight = GT_MATCHING_CFG.LOSS_WEIGHT
+        
+        self.si_l1loss = nn.L1Loss(reduction='mean')
+        self.si_l2loss = nn.MSELoss(reduction='mean')
 
         self.predict_boxes_when_training = predict_boxes_when_training
         self.forward_ret_dict = {}
@@ -404,7 +407,7 @@ class CenterGTMatchingHead(nn.Module):
 
                     # score losses
                     score_preds1, score_preds2 = score_preds[i][paired_idx1], score_preds[i+1][paired_idx2]
-                    si_cls_loss += self.gt_matching_loss(score_preds1, score_preds2) * loss_weight[0]
+                    si_cls_loss += self.si_l2loss(score_preds1, score_preds2) * loss_weight[0]
                     
                     # reg losses
                     box_preds1, box_preds2 = recovered_box_preds[i][paired_idx1], recovered_box_preds[i+1][paired_idx2]
@@ -413,9 +416,9 @@ class CenterGTMatchingHead(nn.Module):
                     diff_loc1, diff_loc2 = box_preds1[:, :3] - box_gts1[:, :3], box_preds2[:, :3] - box_gts2[:, :3]
                     diff_dim1, diff_dim2 = box_preds1[:, 3:6] / box_gts1[:, 3:6], box_preds2[:, 3:6] / box_gts2[:, 3:6]
                     diff_rot1 = torch.stack([torch.sin(box_preds1[:, 6]) - torch.sin(box_gts1[:, 6]), 
-                                                torch.cos(box_preds1[:, 6]) - torch.cos(box_gts1[:, 6])])
+                                             torch.cos(box_preds1[:, 6]) - torch.cos(box_gts1[:, 6])])
                     diff_rot2 = torch.stack([torch.sin(box_preds2[:, 6]) - torch.sin(box_gts2[:, 6]), 
-                                                torch.cos(box_preds2[:, 6]) - torch.cos(box_gts2[:, 6])])
+                                             torch.cos(box_preds2[:, 6]) - torch.cos(box_gts2[:, 6])])
 
                     diff_loc1 = torch.stack([diff_loc1[:, 0] * torch.cos(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.sin(box_gts1[:, 6]),
                                             -diff_loc1[:, 0] * torch.sin(box_gts1[:, 6]) + diff_loc1[:, 1] * torch.cos(box_gts1[:, 6]),
@@ -425,9 +428,9 @@ class CenterGTMatchingHead(nn.Module):
                                             -diff_loc2[:, 0] * torch.sin(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.cos(box_gts2[:, 6]),
                                             diff_loc2[:, 2]], dim=1)
 
-                    si_reg_loss += self.gt_matching_loss(diff_loc1, diff_loc2) * loss_weight[1]
-                    si_reg_loss += self.gt_matching_loss(diff_dim1, diff_dim2) * loss_weight[2]
-                    si_reg_loss += self.gt_matching_loss(diff_rot1, diff_rot2) * loss_weight[3]
+                    si_reg_loss += self.si_l1loss(diff_loc1, diff_loc2) * loss_weight[1]
+                    si_reg_loss += self.si_l1loss(diff_dim1, diff_dim2) * loss_weight[2]
+                    si_reg_loss += self.si_l1loss(diff_rot1, diff_rot2) * loss_weight[3]
 
                 loss += si_cls_loss + si_reg_loss
                 tb_dict['SI_cls_loss_head_%d' % idx] = si_cls_loss.item() if isinstance(si_cls_loss, torch.Tensor) else si_cls_loss
