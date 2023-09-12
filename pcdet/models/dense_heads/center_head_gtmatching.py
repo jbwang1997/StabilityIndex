@@ -437,7 +437,8 @@ class CenterGTMatchingHead(nn.Module):
                 tb_dict['SI_reg_loss_head_%d' % idx] = si_reg_loss.item() if isinstance(si_reg_loss, torch.Tensor) else si_reg_loss
 
         # feature matching loss
-        if 'gt_matching_dict' in self.forward_ret_dict:
+        if self.model_cfg.get('GT_MATCHING_CFG', None) is not None and \
+            self.model_cfg.GT_MATCHING_CFG.get('ENABLE', False):
             gt_features = self.forward_ret_dict['gt_matching_dict']['gt_features']
             gt_ids = self.forward_ret_dict['gt_matching_dict']['gt_ids']
             batch_ids = self.forward_ret_dict['gt_matching_dict']['batch_ids']
@@ -559,6 +560,38 @@ class CenterGTMatchingHead(nn.Module):
             roi_labels[bs_idx, :num_boxes] = pred_dicts[bs_idx]['pred_labels']
         return rois, roi_scores, roi_labels
 
+    def crop_gt_features(self, x, gt_boxes, gt_ids, aug_matrix, cfg):
+        bev_boxes = []
+        bev_box_ids = []
+        batch_ids = []
+        flip_flags = []
+        for i, (boxes_per_batch, ids_per_batch, matrix) in enumerate(zip(gt_boxes, gt_ids, aug_matrix)):
+            boxes_per_batch = boxes_per_batch[ids_per_batch != '']
+            bev_boxes.append(boxes_per_batch[:, [0, 1, 3, 4, 6]])
+            bev_box_ids.append(ids_per_batch[ids_per_batch != ''])
+            batch_ids.append(boxes_per_batch.new_full((boxes_per_batch.shape[0], ), i))
+            flip_flag = (matrix[0, 0] * matrix[1, 1]) < 0
+            flip_flags.append(boxes_per_batch.new_full(
+                (boxes_per_batch.shape[0], ), flip_flag, dtype=torch.bool))
+        bev_boxes = torch.cat(bev_boxes, dim=0)
+        bev_box_ids = np.concatenate(bev_box_ids, axis=0)
+        batch_ids = torch.cat(batch_ids, dim=0)
+        flip_flags = torch.cat(flip_flags, dim=0)
+
+        bev_boxes[:, 0] = (bev_boxes[:, 0] - self.point_cloud_range[0]) / self.voxel_size[0]
+        bev_boxes[:, 1] = (bev_boxes[:, 1] - self.point_cloud_range[0]) / self.voxel_size[0]
+        bev_boxes[:, 2] = bev_boxes[:, 2] / self.voxel_size[0]
+        bev_boxes[:, 3] = bev_boxes[:, 3] / self.voxel_size[0]
+        bev_rois = torch.cat([batch_ids[..., None], bev_boxes], dim=1)
+        gt_features = self.roi_align(x, bev_rois)
+        if cfg.get('FLIP_WITH_AUG', False):
+            gt_features_flip = torch.flip(gt_features, (2, ))
+            gt_features = torch.where(flip_flags[:, None, None, None], gt_features_flip, gt_features)
+        feat_size = x.shape[1] * self.roi_align.output_size ** 2
+        gt_features = gt_features.reshape(bev_rois.shape[0], feat_size)
+
+        return gt_features, bev_box_ids, batch_ids
+
     def forward(self, data_dict):
         spatial_features_2d = data_dict['spatial_features_2d']
         x = self.shared_conv(spatial_features_2d)
@@ -576,30 +609,13 @@ class CenterGTMatchingHead(nn.Module):
             target_dict['lidar_aug_matrix'] = data_dict.get('lidar_aug_matrix', None)
             self.forward_ret_dict['target_dicts'] = target_dict
 
-            if self.model_cfg.get('GT_MATCHING_CFG', None) is not None:
-                bev_boxes = []
-                bev_box_ids = []
-                batch_ids = []
-                for i, (boxes_per_batch, ids_per_batch) in enumerate(
-                    zip(data_dict['gt_boxes'], data_dict['gt_ids'])):
-                    boxes_per_batch = boxes_per_batch[ids_per_batch != '']
-                    bev_boxes.append(boxes_per_batch[:, [0, 1, 3, 4, 6]])
-                    bev_box_ids.append(ids_per_batch[ids_per_batch != ''])
-                    batch_ids.append(
-                        boxes_per_batch.new_full((boxes_per_batch.shape[0], ), i))
-                bev_boxes = torch.cat(bev_boxes, dim=0)
-                bev_box_ids = np.concatenate(bev_box_ids, axis=0)
-                batch_ids = torch.cat(batch_ids, dim=0)
-                
-                bev_boxes[:, 0] = (bev_boxes[:, 0] - self.point_cloud_range[0]) / self.voxel_size[0]
-                bev_boxes[:, 1] = (bev_boxes[:, 1] - self.point_cloud_range[0]) / self.voxel_size[0]
-                bev_boxes[:, 2] = bev_boxes[:, 2] / self.voxel_size[0]
-                bev_boxes[:, 3] = bev_boxes[:, 3] / self.voxel_size[0]
-                bev_rois = torch.cat([batch_ids[..., None], bev_boxes], dim=1)
-                feat_size = x.shape[1] * self.roi_align.output_size ** 2
-                gt_features = self.roi_align(x, bev_rois).reshape(bev_rois.shape[0], feat_size)
+            if self.model_cfg.get('GT_MATCHING_CFG', None) is not None and \
+                self.model_cfg.GT_MATCHING_CFG.get('ENABLE', False):
+                gt_features, bev_box_ids, batch_ids = self.crop_gt_features(
+                    x, data_dict['gt_boxes'], data_dict['gt_ids'],
+                    data_dict['lidar_aug_matrix'], self.model_cfg.GT_MATCHING_CFG)
                 self.forward_ret_dict['gt_matching_dict'] = dict(
-                    gt_features=gt_features, gt_ids=bev_box_ids, 
+                    gt_features=gt_features, gt_ids=bev_box_ids,
                     batch_ids=batch_ids, batch_size=data_dict['batch_size'])
 
         self.forward_ret_dict['pred_dicts'] = pred_dicts
