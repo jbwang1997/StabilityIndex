@@ -314,6 +314,8 @@ class DataAugmentor(object):
             data_dict['gt_names'] = data_dict['gt_names'][gt_boxes_mask]
             if 'gt_ids' in data_dict:
                 data_dict['gt_ids'] = data_dict['gt_ids'][gt_boxes_mask]
+            if 'num_points_in_gt' in data_dict:
+                data_dict['num_points_in_gt'] = data_dict['num_points_in_gt'][gt_boxes_mask]
             if 'gt_boxes2d' in data_dict:
                 data_dict['gt_boxes2d'] = data_dict['gt_boxes2d'][gt_boxes_mask]
 

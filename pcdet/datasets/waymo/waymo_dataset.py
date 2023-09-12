@@ -428,7 +428,7 @@ class WaymoDataset(DatasetTemplate):
         data_dict['metadata'] = info.get('metadata', info['frame_id'])
         if isinstance(data_dict['metadata'], dict) and 'frame_id' not in data_dict['metadata']:
             data_dict['metadata']['frame_id'] = info['frame_id']
-        data_dict.pop('num_points_in_gt', None)
+        # data_dict.pop('num_points_in_gt', None)
         return data_dict
 
     def __getitem__(self, index):
@@ -436,8 +436,15 @@ class WaymoDataset(DatasetTemplate):
 
         if self.dataset_cfg.get('TWO_STREAM', False) and self.training:
             max_itv = self.dataset_cfg.get('TWO_STREAM_MAX_INTERVAL', False)
-            index2 = index + np.random.randint(-max_itv, max_itv + 1)
-            index2 = max(0, min(index2, len(self) - 1))
+            interval = np.random.randint(-max_itv, max_itv + 1)
+            if not hasattr(self, 'seq_groups'):
+                self.seq_groups = self.group_idx_by_seq()
+            for seq_group in self.seq_groups:
+                if index in seq_group:
+                    break
+            idx_in_group = seq_group.index(index)
+            new_idx_in_group = max(0, min(idx_in_group + interval, len(seq_group) - 1))
+            index2 = seq_group[new_idx_in_group]
             data_dict2 = self.helper_getitem(index2)
 
             for key, val in data_dict2.items():
@@ -489,6 +496,13 @@ class WaymoDataset(DatasetTemplate):
                 elif key in ['gt_ids']:
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.dtype('<U22'))
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['num_points_in_gt']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.float32)
                     for k in range(batch_size):
                         batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
                     ret[key] = batch_gt_boxes3d

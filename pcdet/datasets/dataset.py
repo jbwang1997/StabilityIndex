@@ -201,6 +201,8 @@ class DatasetTemplate(torch_data.Dataset):
 
             if 'gt_ids' in data_dict:
                 data_dict['gt_ids'] = data_dict['gt_ids'][selected]
+            if 'num_points_in_gt' in data_dict:
+                data_dict['num_points_in_gt'] = data_dict['num_points_in_gt'][selected]
             if data_dict.get('gt_boxes2d', None) is not None:
                 data_dict['gt_boxes2d'] = data_dict['gt_boxes2d'][selected]
 
@@ -254,6 +256,13 @@ class DatasetTemplate(torch_data.Dataset):
                 elif key in ['gt_ids']:
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.dtype('<U22'))
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['num_points_in_gt']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.float32)
                     for k in range(batch_size):
                         batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
                     ret[key] = batch_gt_boxes3d

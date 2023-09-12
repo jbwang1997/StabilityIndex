@@ -92,6 +92,8 @@ class DataProcessor(object):
             data_dict['gt_boxes'] = data_dict['gt_boxes'][mask]
             if 'gt_ids' in data_dict:
                 data_dict['gt_ids'] = data_dict['gt_ids'][mask]
+            if 'num_points_in_gt' in data_dict:
+                data_dict['num_points_in_gt'] = data_dict['num_points_in_gt'][mask]
         return data_dict
 
     def shuffle_points(self, data_dict=None, config=None):
