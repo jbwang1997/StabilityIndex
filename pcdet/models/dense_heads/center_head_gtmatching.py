@@ -442,7 +442,6 @@ class CenterGTMatchingHead(nn.Module):
             gt_features = self.forward_ret_dict['gt_matching_dict']['gt_features']
             gt_ids = self.forward_ret_dict['gt_matching_dict']['gt_ids']
             batch_ids = self.forward_ret_dict['gt_matching_dict']['batch_ids']
-            # batch_size = self.forward_ret_dict['gt_matching_dict']['batch_size']
 
             if gt_features.shape[0] != 0:
                 paired_feature1 = []
@@ -457,13 +456,9 @@ class CenterGTMatchingHead(nn.Module):
                     paired_feature2.append(features2[paired_idx2])
                 paired_feature1 = torch.cat(paired_feature1, dim=0)
                 paired_feature2 = torch.cat(paired_feature2, dim=0)
-                mean_features = ((paired_feature1 + paired_feature2) / 2).detach()
-
-                pred_features = torch.cat([paired_feature1, paired_feature2], dim=0)
-                target_features = torch.cat([mean_features, mean_features], dim=0)
-                if pred_features.shape[0] != 0:
+                if paired_feature1.shape[0] != 0:
                     loss_feat_matching += self.gt_matching_loss(
-                        pred_features, target_features) * self.gt_matching_loss_weight
+                        paired_feature1, paired_feature2) * self.gt_matching_loss_weight
 
         # if loss_feat_matching is tensor
         tb_dict['gt_matching_loss'] = loss_feat_matching.item() if isinstance(loss_feat_matching, torch.Tensor) else loss_feat_matching
@@ -579,17 +574,28 @@ class CenterGTMatchingHead(nn.Module):
         flip_flags = torch.cat(flip_flags, dim=0)
 
         bev_boxes[:, 0] = (bev_boxes[:, 0] - self.point_cloud_range[0]) / self.voxel_size[0]
-        bev_boxes[:, 1] = (bev_boxes[:, 1] - self.point_cloud_range[0]) / self.voxel_size[0]
+        bev_boxes[:, 1] = (bev_boxes[:, 1] - self.point_cloud_range[1]) / self.voxel_size[1]
         bev_boxes[:, 2] = bev_boxes[:, 2] / self.voxel_size[0]
-        bev_boxes[:, 3] = bev_boxes[:, 3] / self.voxel_size[0]
+        bev_boxes[:, 3] = bev_boxes[:, 3] / self.voxel_size[1]
         bev_rois = torch.cat([batch_ids[..., None], bev_boxes], dim=1)
         gt_features = self.roi_align(x, bev_rois)
+
+        # norm gt features to avoid shrink feature scale
+        if cfg.get('NORM_FEATURE', False):
+            N, C, H, W = gt_features.shape
+            gt_features = gt_features.permute(1, 0, 2, 3).reshape(C, -1)
+            mean = gt_features.mean(dim=-1, keepdim=True)
+            std = gt_features.std(dim=-1, keepdim=True)
+            gt_features = (gt_features - mean) / (std + 1e-6)
+            gt_features = gt_features.reshape(C, N, H, W).permute(1, 0, 2, 3)
+
+        # flip the roi features when the point cloud has been flipped in dataloader.
         if cfg.get('FLIP_WITH_AUG', False):
             gt_features_flip = torch.flip(gt_features, (2, ))
             gt_features = torch.where(flip_flags[:, None, None, None], gt_features_flip, gt_features)
+
         feat_size = x.shape[1] * self.roi_align.output_size ** 2
         gt_features = gt_features.reshape(bev_rois.shape[0], feat_size)
-
         return gt_features, bev_box_ids, batch_ids
 
     def forward(self, data_dict):
@@ -615,8 +621,7 @@ class CenterGTMatchingHead(nn.Module):
                     x, data_dict['gt_boxes'], data_dict['gt_ids'],
                     data_dict['lidar_aug_matrix'], self.model_cfg.GT_MATCHING_CFG)
                 self.forward_ret_dict['gt_matching_dict'] = dict(
-                    gt_features=gt_features, gt_ids=bev_box_ids,
-                    batch_ids=batch_ids, batch_size=data_dict['batch_size'])
+                    gt_features=gt_features, gt_ids=bev_box_ids, batch_ids=batch_ids)
 
         self.forward_ret_dict['pred_dicts'] = pred_dicts
 
