@@ -388,6 +388,8 @@ class WaymoDataset(DatasetTemplate):
                     'roi_scores': pred_scores,
                     'roi_labels': pred_labels,
                 })
+        else:
+            input_dict['poses'] = info['pose'].reshape((4, 4))
 
         input_dict.update({
             'points': points,
@@ -431,6 +433,65 @@ class WaymoDataset(DatasetTemplate):
         # data_dict.pop('num_points_in_gt', None)
         return data_dict
 
+    def prepare_data(self, data_dict):
+        """
+        Args:
+            data_dict:
+                points: optional, (N, 3 + C_in)
+                gt_boxes: optional, (N, 7 + C) [x, y, z, dx, dy, dz, heading, ...]
+                gt_names: optional, (N), string
+                ...
+
+        Returns:
+            data_dict:
+                frame_id: string
+                points: (N, 3 + C_in)
+                gt_boxes: optional, (N, 7 + C) [x, y, z, dx, dy, dz, heading, ...]
+                gt_names: optional, (N), string
+                use_lead_xyz: bool
+                voxels: optional (num_voxels, max_points_per_voxel, 3 + C)
+                voxel_coords: optional (num_voxels, 3)
+                voxel_num_points: optional (num_voxels)
+                ...
+        """
+        if self.training:
+            assert 'gt_boxes' in data_dict, 'gt_boxes should be provided for training'
+            gt_boxes_mask = np.array([n in self.class_names for n in data_dict['gt_names']], dtype=np.bool_)
+            
+            if 'calib' in data_dict:
+                calib = data_dict['calib']
+            data_dict = self.data_augmentor.forward(
+                data_dict={
+                    **data_dict,
+                    'gt_boxes_mask': gt_boxes_mask
+                }
+            )
+            if 'calib' in data_dict:
+                data_dict['calib'] = calib
+        data_dict = self.set_lidar_aug_matrix(data_dict)
+        if data_dict.get('gt_boxes', None) is not None:
+            selected = common_utils.keep_arrays_by_name(data_dict['gt_names'], self.class_names)
+            data_dict['gt_boxes'] = data_dict['gt_boxes'][selected]
+            data_dict['gt_names'] = data_dict['gt_names'][selected]
+            gt_classes = np.array([self.class_names.index(n) + 1 for n in data_dict['gt_names']], dtype=np.int32)
+            gt_boxes = np.concatenate((data_dict['gt_boxes'], gt_classes.reshape(-1, 1).astype(np.float32)), axis=1)
+            data_dict['gt_boxes'] = gt_boxes
+
+            if 'gt_ids' in data_dict:
+                data_dict['gt_ids'] = data_dict['gt_ids'][selected]
+            if 'num_points_in_gt' in data_dict:
+                data_dict['num_points_in_gt'] = data_dict['num_points_in_gt'][selected]
+            if data_dict.get('gt_boxes2d', None) is not None:
+                data_dict['gt_boxes2d'] = data_dict['gt_boxes2d'][selected]
+
+        if data_dict.get('points', None) is not None:
+            data_dict = self.point_feature_encoder.forward(data_dict)
+
+        data_dict = self.data_processor.forward(data_dict=data_dict)
+
+        data_dict.pop('gt_names', None)
+        return data_dict
+
     def __getitem__(self, index):
         data_dict = self.helper_getitem(index)
 
@@ -446,10 +507,14 @@ class WaymoDataset(DatasetTemplate):
             new_idx_in_group = max(0, min(idx_in_group + interval, len(seq_group) - 1))
             index2 = seq_group[new_idx_in_group]
             data_dict2 = self.helper_getitem(index2)
+        
+        if len(data_dict['gt_boxes']) == 0 or len(data_dict2['gt_boxes']) == 0:
+            new_index = np.random.randint(self.__len__())
+            return self.__getitem__(new_index)
 
-            for key, val in data_dict2.items():
-                data_dict[f'{key}_two_stream'] = val
-            del data_dict2
+        for key, val in data_dict2.items():
+            data_dict[f'{key}_two_stream'] = val
+        del data_dict2
 
         return data_dict
 
