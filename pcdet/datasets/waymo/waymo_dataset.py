@@ -495,6 +495,10 @@ class WaymoDataset(DatasetTemplate):
     def __getitem__(self, index):
         data_dict = self.helper_getitem(index)
 
+        if self.training and len(data_dict['gt_boxes']) == 0:
+            new_index = np.random.randint(self.__len__())
+            return self.__getitem__(new_index)
+
         if self.dataset_cfg.get('TWO_STREAM', False) and self.training:
             max_itv = self.dataset_cfg.get('TWO_STREAM_MAX_INTERVAL', False)
             interval = np.random.randint(-max_itv, max_itv + 1)
@@ -508,13 +512,13 @@ class WaymoDataset(DatasetTemplate):
             index2 = seq_group[new_idx_in_group]
             data_dict2 = self.helper_getitem(index2)
         
-        if len(data_dict['gt_boxes']) == 0 or len(data_dict2['gt_boxes']) == 0:
-            new_index = np.random.randint(self.__len__())
-            return self.__getitem__(new_index)
+            if len(data_dict2['gt_boxes']) == 0:
+                new_index = np.random.randint(self.__len__())
+                return self.__getitem__(new_index)
 
-        for key, val in data_dict2.items():
-            data_dict[f'{key}_two_stream'] = val
-        del data_dict2
+            for key, val in data_dict2.items():
+                data_dict[f'{key}_two_stream'] = val
+            del data_dict2
 
         return data_dict
 
