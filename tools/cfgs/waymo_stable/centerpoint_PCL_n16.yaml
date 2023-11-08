@@ -12,8 +12,7 @@ DATA_CONFIG:
 MODEL:
     NAME: CenterPoint
 
-    # PRETRAINED: '../output/waymo_stable/centerpoint_baseline/default/ckpt/checkpoint_epoch_36.pth'
-    PRETRAINED: '../output/waymo_stable_temp/centerpoint_alignment_full/default/ckpt/checkpoint_epoch_36.pth'
+    PRETRAINED: '../output/waymo_stable/centerpoint_baseline/default/ckpt/checkpoint_epoch_36.pth'
 
     VFE:
         NAME: MeanVFE
