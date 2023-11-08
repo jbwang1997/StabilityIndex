@@ -4,6 +4,7 @@ import pickle
 import argparse
 import numpy as np
 from collections import defaultdict
+from scipy.optimize import linear_sum_assignment
 from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou_bev, boxes_aligned_iou3d_gpu, boxes_iou3d_gpu
 from torch_scatter import scatter_max
 from tqdm import tqdm
@@ -94,71 +95,34 @@ def align_bias_into_horizon(det_boxes, gt_boxes):
     return torch.cat([loc_bias, extent_bias, heading_bias], dim=1).cpu().numpy()
 
 
-def align_det_and_gt_by_max_iou(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
-    if det_boxes.shape[0] == 0:
-        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
-
-    det_boxes_ = copy.deepcopy(det_boxes)
-    gt_boxes_ = copy.deepcopy(gt_boxes)
+def align_det_and_gt_by_hungarian(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
+    aligned_boxes, aligned_scores = np.zeros(gt_boxes.shape), np.zeros(gt_boxes.shape[0])
     for i, class_name in enumerate(class_names):
-        det_mask = det_names == class_name
-        det_boxes_[det_mask][:, :2] = det_boxes_[det_mask][:, :2] + 1000 * i
-        gt_mask = gt_names == class_name
-        gt_boxes_[gt_mask][:, :2] = gt_boxes_[gt_mask][:, :2] + 1000 * i
+        cls_mask = det_names == class_name
+        cls_det_boxes = det_boxes[cls_mask]
+        cls_det_scores = det_scores[cls_mask]
+        cls_gt_boxes = gt_boxes[gt_names == class_name]
+        num_det = cls_det_boxes.shape[0]
+        num_gt = cls_gt_boxes.shape[0]
+
+        cls_det_boxes = np.concatenate([cls_det_boxes, cls_gt_boxes], axis=0)
+        cls_det_scores = np.concatenate([cls_det_scores, np.zeros(cls_gt_boxes.shape[0])], axis=0)
+
+        if cls_gt_boxes.shape[0] == 0:
+            continue
+
+        cuda_det_boxes = torch.from_numpy(cls_det_boxes).cuda().float()
+        cuda_gt_boxes = torch.from_numpy(cls_gt_boxes).cuda().float()
+        ious = boxes_iou3d_gpu(cuda_det_boxes, cuda_gt_boxes).clip(0, 1)
+        ious[num_det:, :] = torch.eye(num_gt, dtype=ious.dtype, device=ious.device) * 0.1
+
+        # cost = -(ious.cpu().numpy() * cls_det_scores[:, None])
+        cost = -ious.cpu().numpy()
+        cost = cost.T
+        row_ind, col_ind = linear_sum_assignment(cost)
+        aligned_boxes[gt_names == class_name] = cls_det_boxes[col_ind]
+        aligned_scores[gt_names == class_name] = cls_det_scores[col_ind]
     
-    gt_boxes_ = torch.from_numpy(gt_boxes_).float().cuda()
-    det_boxes_ = torch.from_numpy(det_boxes_).float().cuda()
-    ious = boxes_iou3d_gpu(gt_boxes_, det_boxes_)
-    max_iou, max_idx = torch.max(ious, axis=1)
-    max_iou = max_iou.cpu().numpy()
-    max_idx = max_idx.cpu().numpy()
-
-    aligned_boxes = det_boxes[max_idx]
-    aligned_scores = det_scores[max_idx]
-    # if the max_iou < 0.1, we think this gt has no aligned detection boxes.
-    if (max_iou < 0.1).any():
-        aligned_scores[max_iou < 0.1] = 0
-        aligned_boxes[max_iou < 0.1] = gt_boxes[max_iou < 0.1]
-
-    return aligned_boxes, aligned_scores
-
-
-def align_det_and_gt_by_max_score(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
-    if det_boxes.shape[0] == 0:
-        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
-
-    gt_boxes_ = torch.from_numpy(gt_boxes).float().cuda()
-    det_boxes_ = torch.from_numpy(det_boxes).float().cuda()
-    for i, class_name in enumerate(class_names):
-        det_mask = det_names == class_name
-        det_boxes_[det_mask][:, :2] = det_boxes_[det_mask][:, :2] + 1000 * i
-        gt_mask = gt_names == class_name
-        gt_boxes_[gt_mask][:, :2] = gt_boxes_[gt_mask][:, :2] + 1000 * i
-    det_scores_ = torch.from_numpy(det_scores).float().cuda()
-
-    ious = boxes_iou3d_gpu(det_boxes_, gt_boxes_)
-    ious = ious.clip(0, 1)
-    max_iou, max_idx = torch.max(ious, axis=1)
-
-    det_boxes = det_boxes[max_iou.cpu().numpy() > 0.1]
-    if det_boxes.shape[0] == 0:
-        return copy.deepcopy(gt_boxes), np.zeros(gt_boxes.shape[0])
-    det_scores_ = det_scores_[max_iou > 0.1]
-    max_idx = max_idx[max_iou > 0.1]
-    max_iou = max_iou[max_iou > 0.1]
-
-    num_gt, num_tp = gt_boxes.shape[0], max_iou.shape[0]
-    scatter_max_scores = torch.zeros(num_gt, dtype=torch.float32).cuda()
-    scatter_max_scores, scatter_max_idx = scatter_max(
-        det_scores_, max_idx, out=scatter_max_scores)
-    fn_mask = (scatter_max_idx < 0) | (scatter_max_idx > num_tp - 1)
-    scatter_max_idx = scatter_max_idx.clip(0, num_tp - 1)
-
-    aligned_idx = scatter_max_idx.cpu().numpy()
-    fn_mask = fn_mask.cpu().numpy()
-    aligned_boxes = det_boxes[aligned_idx]
-    aligned_boxes[fn_mask] = gt_boxes[fn_mask]
-    aligned_scores = scatter_max_scores.cpu().numpy()
     return aligned_boxes, aligned_scores
 
 
@@ -172,13 +136,9 @@ def generate_gt_box_mask(info, class_names):
     return box_mask
 
 
-def eval_stable_index2(cur_det_annos, pre_det_annos, cur_gt_annos, 
-                       pre_gt_annos, class_names, align_func='max_iou'):
-    assert align_func in ['max_iou', 'max_score']
+def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names):
     assert len(cur_det_annos) == len(pre_det_annos) == len(cur_gt_annos) == len(pre_gt_annos), \
         'The number of gt and pred should be aligned.'
-    align_func = align_det_and_gt_by_max_iou if align_func == 'max_iou' \
-        else align_det_and_gt_by_max_score
 
     cur_det_annos = copy.deepcopy(cur_det_annos)
     pre_det_annos = copy.deepcopy(pre_det_annos)
@@ -236,10 +196,10 @@ def eval_stable_index2(cur_det_annos, pre_det_annos, cur_gt_annos,
             pre_det_boxes3d = pre_det_boxes3d[:, :7]
 
         # align prediction and gt by iou
-        cur_det_boxes3d, cur_det_scores = align_func(cur_det_boxes3d, cur_det_scores, cur_det_names,
-                                                     cur_gt_boxes3d, gt_names, class_names)
-        pre_det_boxes3d, pre_det_scores = align_func(pre_det_boxes3d, pre_det_scores, pre_det_names,
-                                                     pre_gt_boxes3d, gt_names, class_names)
+        cur_det_boxes3d, cur_det_scores = align_det_and_gt_by_hungarian(
+            cur_det_boxes3d, cur_det_scores, cur_det_names, cur_gt_boxes3d, gt_names, class_names)
+        pre_det_boxes3d, pre_det_scores = align_det_and_gt_by_hungarian(
+            pre_det_boxes3d, pre_det_scores, pre_det_names, pre_gt_boxes3d, gt_names, class_names)
 
         paired_infos['cur_gt_boxes3d'].append(cur_gt_boxes3d)
         paired_infos['pre_gt_boxes3d'].append(pre_gt_boxes3d)
@@ -283,6 +243,12 @@ def eval_stable_index2(cur_det_annos, pre_det_annos, cur_gt_annos,
 
     stable_index = (1 - np.abs(confidence_vars)) * (localization_vars + extent_vars + heading_vars) / 3
 
+    paired_infos['confidence_vars'] = confidence_vars
+    paired_infos['localization_vars'] = localization_vars
+    paired_infos['extent_vars'] = extent_vars
+    paired_infos['heading_vars'] = heading_vars
+    paired_infos['stable_index'] = stable_index
+
     def get_values_by_mask(*args, mask=None):
         assert mask is not None
         return [arg[mask] for arg in args]
@@ -313,7 +279,7 @@ def eval_stable_index2(cur_det_annos, pre_det_annos, cur_gt_annos,
     return metrics
 
 
-def print_metrics(metrics, class_names):
+def print_stable_index_results(metrics, class_names):
     metrics_str = ''
     metrics_str += '\n----------------------------------\n'
     metrics_str += f'Stable Index (Overall)'
@@ -328,7 +294,7 @@ def print_metrics(metrics, class_names):
                                    f"{metrics['EXTENT_VARIATION_%s' % class_name]:.4f}",
                                    f"{metrics['HEADING_VARIATION_%s' % class_name]:.4f}"])
     metrics_str += tabulate(metrics_data_print, headers=['class', 'SI', 'confidence', 
-                                                        'localization', 'extent',
+                                                        'localization', 'ectent',
                                                         'heading'], tablefmt='orgtbl')
 
     # print distance breakdown    
@@ -383,8 +349,8 @@ def main():
         pre_det_annos.append(pred_infos[frame_id_mapper[pre_frame_idx]])
         pre_gt_annos.append(gt_infos[frame_id_mapper[pre_frame_idx]]['annos'])
 
-    stable_index = eval_stable_index2(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, args.class_names)
-    stable_index_str = print_metrics(stable_index, args.class_names)
+    stable_index = eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, args.class_names)
+    stable_index_str = print_stable_index_results(stable_index, args.class_names)
     print(stable_index_str)
 
     # save to file

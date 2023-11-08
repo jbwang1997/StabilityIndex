@@ -717,11 +717,11 @@ class WaymoDataset(DatasetTemplate):
                 pre_det_annos.append(eval_det_annos[frame_id_mapper[pre_frame_idx]])
                 pre_gt_annos.append(eval_gt_annos[frame_id_mapper[pre_frame_idx]])
 
-            from .stable_index_eval import eval_stable_index
-            from .stable_index_eval import print_metrics
-            ap_dict = eval_stable_index(
+            from .waymo_stable_index import eval_waymo_stable_index
+            from .waymo_stable_index import print_stable_index_results
+            ap_dict = eval_waymo_stable_index(
                 cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names=class_names)
-            ap_result_str = print_metrics(ap_dict, class_names)
+            ap_result_str = print_stable_index_results(ap_dict, class_names)
         else:
             raise NotImplementedError
 

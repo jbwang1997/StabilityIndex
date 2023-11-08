@@ -122,14 +122,18 @@ def eval_one_epoch(cfg, args, model, dataloader, epoch_id, logger, dist_test=Fal
     with open(result_dir / 'result.pkl', 'wb') as f:
         pickle.dump(det_annos, f)
 
-    result_str, result_dict = dataset.evaluation(
-        det_annos, class_names,
-        eval_metric=cfg.MODEL.POST_PROCESSING.EVAL_METRIC,
-        output_path=final_output_dir
-    )
+    cfg_metrics = cfg.MODEL.POST_PROCESSING.EVAL_METRIC
+    if not isinstance(cfg, list):
+        cfg_metrics = [cfg_metrics]
 
-    logger.info(result_str)
-    ret_dict.update(result_dict)
+    for cfg_metric in cfg_metrics:
+        logger.info('****************Evaluate %s.*****************' % cfg_metric)
+        result_str, result_dict = dataset.evaluation(
+            det_annos, class_names, eval_metric=cfg_metric,
+            output_path=final_output_dir)
+
+        logger.info(result_str)
+        ret_dict.update(result_dict)
 
     logger.info('Result is saved to %s' % result_dir)
     logger.info('****************Evaluation done.*****************')
