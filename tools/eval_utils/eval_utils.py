@@ -123,7 +123,7 @@ def eval_one_epoch(cfg, args, model, dataloader, epoch_id, logger, dist_test=Fal
         pickle.dump(det_annos, f)
 
     cfg_metrics = cfg.MODEL.POST_PROCESSING.EVAL_METRIC
-    if not isinstance(cfg, list):
+    if not isinstance(cfg_metrics, list):
         cfg_metrics = [cfg_metrics]
 
     for cfg_metric in cfg_metrics:

@@ -372,12 +372,6 @@ class CenterPCLHead(nn.Module):
                 recovered_target_boxes = self.trans_box_by_matrix_batch(target_boxes_src, inverse_lidar_aug_matrix)
                 recovered_box_preds = self.trans_box_by_matrix_batch(box_preds, inverse_lidar_aug_matrix)
 
-                ### (irving) remember to check this when using a new aug / a new dataset
-                ### currently, the rotation angle is between the box and the x axis
-                # check_err = (recovered_target_boxes[0, :10] - recovered_target_boxes[1, :10]).max()
-                # if check_err > 1e-3:
-                #     raise ValueError('The recovered target boxes are not the same')
-
                 si_cls_loss, si_reg_loss = 0.0, 0.0
                 gt_ids = target_dicts['gt_ids'][idx]
                 for i in range(0, batch_size, 2):
