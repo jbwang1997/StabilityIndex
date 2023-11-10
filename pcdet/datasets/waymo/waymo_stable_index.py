@@ -294,7 +294,7 @@ def print_stable_index_results(metrics, class_names):
                                    f"{metrics['EXTENT_VARIATION_%s' % class_name]:.4f}",
                                    f"{metrics['HEADING_VARIATION_%s' % class_name]:.4f}"])
     metrics_str += tabulate(metrics_data_print, headers=['class', 'SI', 'confidence', 
-                                                        'localization', 'ectent',
+                                                        'localization', 'extent',
                                                         'heading'], tablefmt='orgtbl')
 
     # print distance breakdown    
