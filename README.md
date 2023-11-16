@@ -14,7 +14,308 @@ Code will be made publicly available.
 
 ## Demos
 
-## Results
+## Main Results
+
+### Benckmark on Waymo Open Dataset
+
+<style type="text/css">
+.tg  {border-collapse:collapse;border-spacing:0;}
+.tg td{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
+  overflow:hidden;padding:10px 5px;word-break:normal;}
+.tg th{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
+  font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
+.tg .tg-48rl{text-align:center;vertical-align:middle}
+.tg .tg-vwo1{text-align:center;vertical-align:top}
+/* .tg .tg-48rl{background-color:#000000;border-color:#000000;color:#000000;text-align:center;vertical-align:middle} */
+/* .tg .tg-vwo1{background-color:#000000;border-color:#000000;color:#000000;text-align:center;vertical-align:top} */
+</style>
+<table class="tg">
+<thead>
+  <tr>
+    <th class="tg-vwo1" rowspan="2">Methods</th>
+    <th class="tg-vwo1" colspan="6">Vehicle(%)</th>
+    <th class="tg-vwo1" colspan="6">Pedestrain<span style="font-weight:400;font-style:normal">(%)</span></th>
+    <th class="tg-vwo1" colspan="6">Cyclist<span style="font-weight:400;font-style:normal">(%)</span></th>
+  </tr>
+  <tr>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+    <th class="tg-vwo1">SI_c</th>
+    <th class="tg-vwo1">SI_l</th>
+    <th class="tg-vwo1">SI_e</th>
+    <th class="tg-vwo1">SI_h</th>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+    <th class="tg-vwo1">SI_c</th>
+    <th class="tg-vwo1">SI_l</th>
+    <th class="tg-vwo1">SI_e</th>
+    <th class="tg-vwo1">SI_h</th>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+    <th class="tg-vwo1">SI_c</th>
+    <th class="tg-vwo1">SI_l</th>
+    <th class="tg-vwo1">SI_e</th>
+    <th class="tg-vwo1">SI_h</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td class="tg-vwo1">Second</td>
+    <td class="tg-48rl">72.60</td>
+    <td class="tg-48rl">81.32</td>
+    <td class="tg-48rl">90.17</td>
+    <td class="tg-48rl">84.18</td>
+    <td class="tg-48rl">91.95</td>
+    <td class="tg-48rl">92.10</td>
+    <td class="tg-48rl">59.81</td>
+    <td class="tg-48rl">62.80</td>
+    <td class="tg-48rl">83.94</td>
+    <td class="tg-48rl">69.34</td>
+    <td class="tg-48rl">87.30</td>
+    <td class="tg-48rl">67.31</td>
+    <td class="tg-48rl">61.95</td>
+    <td class="tg-48rl">66.29</td>
+    <td class="tg-48rl">81.94</td>
+    <td class="tg-48rl">75.36</td>
+    <td class="tg-48rl">85.99</td>
+    <td class="tg-48rl">81.29</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">CenterPoint-Pillar</td>
+    <td class="tg-48rl">72.44</td>
+    <td class="tg-48rl">80.61</td>
+    <td class="tg-48rl">89.03</td>
+    <td class="tg-48rl">85.37</td>
+    <td class="tg-48rl">91.00</td>
+    <td class="tg-48rl">92.82</td>
+    <td class="tg-48rl">65.59</td>
+    <td class="tg-48rl">64.57</td>
+    <td class="tg-48rl">83.24</td>
+    <td class="tg-48rl">74.43</td>
+    <td class="tg-48rl">87.38</td>
+    <td class="tg-48rl">68.85</td>
+    <td class="tg-48rl">67.36</td>
+    <td class="tg-48rl">68.06</td>
+    <td class="tg-48rl">80.77%</td>
+    <td class="tg-48rl">77.66</td>
+    <td class="tg-48rl">86.96</td>
+    <td class="tg-48rl">85.89</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">PointPillar</td>
+    <td class="tg-48rl">72.84</td>
+    <td class="tg-48rl">80.84</td>
+    <td class="tg-48rl">89.58</td>
+    <td class="tg-48rl">84.40</td>
+    <td class="tg-48rl">92.26</td>
+    <td class="tg-48rl">91.60</td>
+    <td class="tg-48rl">54.64</td>
+    <td class="tg-48rl">62.03</td>
+    <td class="tg-48rl">84.65</td>
+    <td class="tg-48rl">72.08</td>
+    <td class="tg-48rl">88.83</td>
+    <td class="tg-48rl">57.93</td>
+    <td class="tg-48rl">59.51</td>
+    <td class="tg-48rl">66.14</td>
+    <td class="tg-48rl">82.15%</td>
+    <td class="tg-48rl">74.85</td>
+    <td class="tg-48rl">88.00</td>
+    <td class="tg-48rl">77.36</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">CenterPoint</td>
+    <td class="tg-48rl">73.73</td>
+    <td class="tg-48rl">80.52</td>
+    <td class="tg-48rl">89.04</td>
+    <td class="tg-48rl">85.33</td>
+    <td class="tg-48rl">90.70</td>
+    <td class="tg-48rl">92.88</td>
+    <td class="tg-48rl">69.50</td>
+    <td class="tg-48rl">68.40</td>
+    <td class="tg-48rl">85.74</td>
+    <td class="tg-48rl">73.28</td>
+    <td class="tg-48rl">88.58</td>
+    <td class="tg-48rl">74.95</td>
+    <td class="tg-48rl">71.04</td>
+    <td class="tg-48rl">68.40</td>
+    <td class="tg-48rl">80.31%</td>
+    <td class="tg-48rl">78.47</td>
+    <td class="tg-48rl">87.37</td>
+    <td class="tg-48rl">89.79</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">PartA2Net</td>
+    <td class="tg-48rl">75.02</td>
+    <td class="tg-48rl">82.86</td>
+    <td class="tg-48rl">91.43</td>
+    <td class="tg-48rl">85.38</td>
+    <td class="tg-48rl">91.68</td>
+    <td class="tg-48rl">91.69</td>
+    <td class="tg-48rl">66.16</td>
+    <td class="tg-48rl">65.08</td>
+    <td class="tg-48rl">84.59</td>
+    <td class="tg-48rl">73.61</td>
+    <td class="tg-48rl">86.71</td>
+    <td class="tg-48rl">67.04</td>
+    <td class="tg-48rl">67.90</td>
+    <td class="tg-48rl">72.73</td>
+    <td class="tg-48rl">85.94%</td>
+    <td class="tg-48rl">79.34</td>
+    <td class="tg-48rl">86.97</td>
+    <td class="tg-48rl">84.29</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">PV R-CNN</td>
+    <td class="tg-48rl">75.92</td>
+    <td class="tg-48rl">83.73</td>
+    <td class="tg-48rl">91.94</td>
+    <td class="tg-48rl">86.36</td>
+    <td class="tg-48rl">92.30</td>
+    <td class="tg-48rl">91.66</td>
+    <td class="tg-48rl">66.28</td>
+    <td class="tg-48rl">66.17</td>
+    <td class="tg-48rl">86.02</td>
+    <td class="tg-48rl">73.50</td>
+    <td class="tg-48rl">87.39</td>
+    <td class="tg-48rl">66.58</td>
+    <td class="tg-48rl">68.38</td>
+    <td class="tg-48rl">73.53</td>
+    <td class="tg-48rl">86.84%</td>
+    <td class="tg-48rl">78.86</td>
+    <td class="tg-48rl">88.44</td>
+    <td class="tg-48rl">83.22</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">Voxel R-CNN</td>
+    <td class="tg-48rl">77.19</td>
+    <td class="tg-48rl">84.26</td>
+    <td class="tg-48rl">92.01</td>
+    <td class="tg-48rl">86.66</td>
+    <td class="tg-48rl">92.11</td>
+    <td class="tg-48rl">93.33</td>
+    <td class="tg-48rl">74.21</td>
+    <td class="tg-48rl">69.50</td>
+    <td class="tg-48rl">86.87</td>
+    <td class="tg-48rl">75.33</td>
+    <td class="tg-48rl">88.06</td>
+    <td class="tg-48rl">73.56</td>
+    <td class="tg-48rl">71.68</td>
+    <td class="tg-48rl">73.23</td>
+    <td class="tg-48rl">84.42%</td>
+    <td class="tg-48rl">80.07</td>
+    <td class="tg-48rl">87.67</td>
+    <td class="tg-48rl">89.28</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">VoxelNeXt</td>
+    <td class="tg-48rl">77.84</td>
+    <td class="tg-48rl">84.82</td>
+    <td class="tg-48rl">92.88</td>
+    <td class="tg-48rl">86.28</td>
+    <td class="tg-48rl">91.59</td>
+    <td class="tg-48rl">94.17</td>
+    <td class="tg-48rl">76.24</td>
+    <td class="tg-48rl">74.74</td>
+    <td class="tg-48rl">92.67</td>
+    <td class="tg-48rl">75.65</td>
+    <td class="tg-48rl">88.03</td>
+    <td class="tg-48rl">75.80</td>
+    <td class="tg-48rl">75.59</td>
+    <td class="tg-48rl">76.48</td>
+    <td class="tg-48rl">89.98%</td>
+    <td class="tg-48rl">79.24</td>
+    <td class="tg-48rl">84.90</td>
+    <td class="tg-48rl">87.76</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">PV R-CNN++</td>
+    <td class="tg-48rl">77.88</td>
+    <td class="tg-48rl">84.49</td>
+    <td class="tg-48rl">92.06</td>
+    <td class="tg-48rl">87.22</td>
+    <td class="tg-48rl">92.38</td>
+    <td class="tg-48rl">93.18</td>
+    <td class="tg-48rl">73.99</td>
+    <td class="tg-48rl">69.27</td>
+    <td class="tg-48rl">86.75</td>
+    <td class="tg-48rl">75.27</td>
+    <td class="tg-48rl">88.09</td>
+    <td class="tg-48rl">73.24</td>
+    <td class="tg-48rl">71.84</td>
+    <td class="tg-48rl">73.05</td>
+    <td class="tg-48rl">84.23%</td>
+    <td class="tg-48rl">80.29</td>
+    <td class="tg-48rl">87.66</td>
+    <td class="tg-48rl">89.19</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">PV R-CNN++ Res</td>
+    <td class="tg-48rl">78.33</td>
+    <td class="tg-48rl">85.17</td>
+    <td class="tg-48rl">92.47</td>
+    <td class="tg-48rl">87.52</td>
+    <td class="tg-48rl">92.51</td>
+    <td class="tg-48rl">93.85</td>
+    <td class="tg-48rl">75.75</td>
+    <td class="tg-48rl">70.15</td>
+    <td class="tg-48rl">87.16</td>
+    <td class="tg-48rl">75.83</td>
+    <td class="tg-48rl">87.89</td>
+    <td class="tg-48rl">74.81</td>
+    <td class="tg-48rl">72.47</td>
+    <td class="tg-48rl">73.31</td>
+    <td class="tg-48rl">84.25%</td>
+    <td class="tg-48rl">80.61</td>
+    <td class="tg-48rl">87.58</td>
+    <td class="tg-48rl">89.65</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">DSVT</td>
+    <td class="tg-48rl">78.82</td>
+    <td class="tg-48rl">84.90</td>
+    <td class="tg-48rl">92.51</td>
+    <td class="tg-48rl">86.90</td>
+    <td class="tg-48rl">91.53</td>
+    <td class="tg-48rl">94.76</td>
+    <td class="tg-48rl">76.81</td>
+    <td class="tg-48rl">74.58</td>
+    <td class="tg-48rl">91.88</td>
+    <td class="tg-48rl">76.47</td>
+    <td class="tg-48rl">88.71</td>
+    <td class="tg-48rl">75.92</td>
+    <td class="tg-48rl">75.44</td>
+    <td class="tg-48rl">76.20</td>
+    <td class="tg-48rl">88.22%</td>
+    <td class="tg-48rl">80.48</td>
+    <td class="tg-48rl">86.11</td>
+    <td class="tg-48rl">89.88</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1">TransFusion</td>
+    <td class="tg-48rl">79.00</td>
+    <td class="tg-48rl">82.32</td>
+    <td class="tg-48rl">89.34</td>
+    <td class="tg-48rl">86.8</td>
+    <td class="tg-48rl">92.73</td>
+    <td class="tg-48rl">95.68</td>
+    <td class="tg-48rl">76.52</td>
+    <td class="tg-48rl">69.11</td>
+    <td class="tg-48rl">84.53</td>
+    <td class="tg-48rl">75.39</td>
+    <td class="tg-48rl">89.89</td>
+    <td class="tg-48rl">78.78</td>
+    <td class="tg-48rl">70.11</td>
+    <td class="tg-48rl">70.35</td>
+    <td class="tg-48rl">80.63%</td>
+    <td class="tg-48rl">79.49</td>
+    <td class="tg-48rl">90.56</td>
+    <td class="tg-48rl">91.13</td>
+  </tr>
+</tbody>
+</table>
+
+
+### Results of PCL
 
 ## Installation
 
