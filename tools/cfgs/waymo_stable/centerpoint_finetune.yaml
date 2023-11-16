@@ -4,6 +4,11 @@ DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/waymo_dataset.yaml
     SAMPLED_INTERVAL: {'train': 1, 'test': 1}
 
+    LOAD_OBJ_IDS: True
+    TWO_STREAM: True
+    # n of neighbour sampling
+    TWO_STREAM_MAX_INTERVAL: 0
+
 MODEL:
     NAME: CenterPoint
 
@@ -29,12 +34,17 @@ MODEL:
         NUM_UPSAMPLE_FILTERS: [256, 256]
 
     DENSE_HEAD:
-        NAME: CenterHead
+        NAME: CenterPCLHead
         CLASS_AGNOSTIC: False
 
         CLASS_NAMES_EACH_HEAD: [
             ['Vehicle', 'Pedestrian', 'Cyclist']
         ]
+
+        # PCL hyper-parameters
+        ALIGNMENT:
+            ENABLE: False
+            LOSS_WEIGHT: [1.0, 1.0, 1.0, 1.0]
 
         SHARED_CONV_CHANNEL: 64
         USE_BIAS_BEFORE_NORM: True

@@ -1,4 +1,4 @@
-# Stable Index
+# Towards Stable 3D Object Detection
 
 ## Introduction
 
