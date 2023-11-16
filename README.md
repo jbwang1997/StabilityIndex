@@ -16,7 +16,12 @@ Code will be made publicly available.
 
 ## Main Results
 
+We could not provide the above pretrained models due to [Waymo Dataset License Agreement](https://waymo.com/open/terms/), but you could easily achieve similar performance by training with the default configs.
+
 ### Benckmark on Waymo Open Dataset
+
+<details>
+<summary> Benckmark on Waymo Open Dataset </summary>
 
 <style type="text/css">
 .tg  {border-collapse:collapse;border-spacing:0;}
@@ -26,8 +31,6 @@ Code will be made publicly available.
   font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
 .tg .tg-48rl{text-align:center;vertical-align:middle}
 .tg .tg-vwo1{text-align:center;vertical-align:top}
-/* .tg .tg-48rl{background-color:#000000;border-color:#000000;color:#000000;text-align:center;vertical-align:middle} */
-/* .tg .tg-vwo1{background-color:#000000;border-color:#000000;color:#000000;text-align:center;vertical-align:top} */
 </style>
 <table class="tg">
 <thead>
@@ -314,8 +317,102 @@ Code will be made publicly available.
 </tbody>
 </table>
 
+</details>
+
 
 ### Results of PCL
+
+<style type="text/css">
+.tg  {border-collapse:collapse;border-spacing:0;}
+.tg td{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
+  overflow:hidden;padding:10px 5px;word-break:normal;}
+.tg th{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
+  font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
+.tg .tg-vwo1{text-align:center;vertical-align:top}
+</style>
+<table class="tg">
+<thead>
+  <tr>
+    <th class="tg-vwo1" rowspan="2">Methods</th>
+    <th class="tg-vwo1" colspan="2">Vehicle(%)</th>
+    <th class="tg-vwo1" colspan="2">Pedestrian(%)</th>
+    <th class="tg-vwo1" colspan="2">Cyclist(%)</th>
+  </tr>
+  <tr>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+    <th class="tg-vwo1">mAPH_l1</th>
+    <th class="tg-vwo1">SI</th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_baseline.yaml">Baseline</a></td>
+    <td class="tg-vwo1">73.73</td>
+    <td class="tg-vwo1">80.52</td>
+    <td class="tg-vwo1">69.50</td>
+    <td class="tg-vwo1">68.40</td>
+    <td class="tg-vwo1">71.04</td>
+    <td class="tg-vwo1">68.40</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_finetune.yaml">w/o PCL</a></td>
+    <td class="tg-vwo1">73.70</td>
+    <td class="tg-vwo1">80.93</td>
+    <td class="tg-vwo1">69.55</td>
+    <td class="tg-vwo1">68.35</td>
+    <td class="tg-vwo1">71.27</td>
+    <td class="tg-vwo1">68.20</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_PCL_n0.yaml">PCL (n=0)</a></td>
+    <td class="tg-vwo1">75.57</td>
+    <td class="tg-vwo1">85.42</td>
+    <td class="tg-vwo1">70.18</td>
+    <td class="tg-vwo1">71.87</td>
+    <td class="tg-vwo1">70.86</td>
+    <td class="tg-vwo1">68.80</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_PCL_n4.yaml">PCL (n=4)</a></td>
+    <td class="tg-vwo1">75.26</td>
+    <td class="tg-vwo1">85.83</td>
+    <td class="tg-vwo1">69.56</td>
+    <td class="tg-vwo1">72.76</td>
+    <td class="tg-vwo1">70.65</td>
+    <td class="tg-vwo1">69.22</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_PCL_n8.yaml">PCL (n=8)</a></td>
+    <td class="tg-vwo1">75.04</td>
+    <td class="tg-vwo1">85.94</td>
+    <td class="tg-vwo1">68.82</td>
+    <td class="tg-vwo1">72.87</td>
+    <td class="tg-vwo1">70.31</td>
+    <td class="tg-vwo1">69.32</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_PCL_n12.yaml">PCL (n=12)</a></td>
+    <td class="tg-vwo1">74.64</td>
+    <td class="tg-vwo1">85.93</td>
+    <td class="tg-vwo1">68.50</td>
+    <td class="tg-vwo1">72.95</td>
+    <td class="tg-vwo1">70.85</td>
+    <td class="tg-vwo1">69.33</td>
+  </tr>
+  <tr>
+    <td class="tg-vwo1"><a href="tools/cfgs/waymo_stable/centerpoint_PCL_n16.yaml">PCL (n=16)</a></td>
+    <td class="tg-vwo1">74.54</td>
+    <td class="tg-vwo1">86.00</td>
+    <td class="tg-vwo1">67.82</td>
+    <td class="tg-vwo1">73.14</td>
+    <td class="tg-vwo1">70.25</td>
+    <td class="tg-vwo1">69.16</td>
+  </tr>
+</tbody>
+</table>
 
 ## Installation
 
