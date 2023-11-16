@@ -18,20 +18,8 @@ Code will be made publicly available.
 
 We could not provide the above pretrained models due to [Waymo Dataset License Agreement](https://waymo.com/open/terms/), but you could easily achieve similar performance by training with the default configs.
 
-### Benckmark on Waymo Open Dataset
-
 <details>
 <summary> Benckmark on Waymo Open Dataset </summary>
-
-<style type="text/css">
-.tg  {border-collapse:collapse;border-spacing:0;}
-.tg td{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
-  overflow:hidden;padding:10px 5px;word-break:normal;}
-.tg th{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
-  font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
-.tg .tg-48rl{text-align:center;vertical-align:middle}
-.tg .tg-vwo1{text-align:center;vertical-align:top}
-</style>
 <table class="tg">
 <thead>
   <tr>
@@ -320,16 +308,8 @@ We could not provide the above pretrained models due to [Waymo Dataset License A
 </details>
 
 
-### Results of PCL
-
-<style type="text/css">
-.tg  {border-collapse:collapse;border-spacing:0;}
-.tg td{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
-  overflow:hidden;padding:10px 5px;word-break:normal;}
-.tg th{border-color:black;border-style:solid;border-width:1px;font-family:Arial, sans-serif;font-size:14px;
-  font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}
-.tg .tg-vwo1{text-align:center;vertical-align:top}
-</style>
+<details>
+<summary> Results of PCL </summary>
 <table class="tg">
 <thead>
   <tr>
@@ -413,6 +393,7 @@ We could not provide the above pretrained models due to [Waymo Dataset License A
   </tr>
 </tbody>
 </table>
+</details>
 
 ## Installation
 
@@ -485,7 +466,7 @@ python test.py \
     --ckpt ../output/waymo_stable/centerpoint_PCL_n16/default/ckpt/checkpoint_epoch_5.pth
 ```
 
-If you has tested the model and get the `result.pkl` in `output/waymo_stable/centerpoint_PCL_n16/default/eval/eval_with_train/epoch_5/`, you can directly evaluate stable index by:
+If you has tested the model and got the `result.pkl` in `output`, you can directly evaluate stable index by:
 ```
 python pcdet/datasets/waymo/waymo_stable_index.py \
     --gt_infos data/waymo/waymo_processed_data_v0_5_0_infos_val.pkl \
