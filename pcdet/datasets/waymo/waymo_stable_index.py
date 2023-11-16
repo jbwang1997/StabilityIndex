@@ -98,9 +98,8 @@ def align_bias_into_horizon(det_boxes, gt_boxes):
 def align_det_and_gt_by_hungarian(det_boxes, det_scores, det_names, gt_boxes, gt_names, class_names):
     aligned_boxes, aligned_scores = np.zeros(gt_boxes.shape), np.zeros(gt_boxes.shape[0])
     for i, class_name in enumerate(class_names):
-        cls_mask = det_names == class_name
-        cls_det_boxes = det_boxes[cls_mask]
-        cls_det_scores = det_scores[cls_mask]
+        cls_det_boxes = det_boxes[det_names == class_name] if det_names.shape[0] > 0 else det_boxes
+        cls_det_scores = det_scores[det_names == class_name] if det_names.shape[0] > 0 else det_scores
         cls_gt_boxes = gt_boxes[gt_names == class_name]
         num_det = cls_det_boxes.shape[0]
         num_gt = cls_gt_boxes.shape[0]
