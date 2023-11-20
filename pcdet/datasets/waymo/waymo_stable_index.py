@@ -100,7 +100,7 @@ def align_det_and_gt_by_hungarian(det_boxes, det_scores, det_names, gt_boxes, gt
     for i, class_name in enumerate(class_names):
         cls_det_boxes = det_boxes[det_names == class_name] if det_names.shape[0] > 0 else det_boxes
         cls_det_scores = det_scores[det_names == class_name] if det_names.shape[0] > 0 else det_scores
-        cls_gt_boxes = gt_boxes[gt_names == class_name]
+        cls_gt_boxes = gt_boxes[gt_names == class_name] if gt_names.shape[0] > 0 else gt_boxes
         num_det = cls_det_boxes.shape[0]
         num_gt = cls_gt_boxes.shape[0]
 
@@ -266,15 +266,16 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
         metrics['STABLE_INDEX_%s' % class_name] = _stable_index.mean()
         
         for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
-            distance_mask = (distances > distance[0]) & (distances <= distance[1])
+            MIN, MAX = distance
+            distance_mask = (distances > MIN) & (distances <= MAX)
             cur_mask = class_mask & distance_mask
             _confidence, _localization, _extent, _heading, _stable_index = get_values_by_mask(
                 confidence_vars, localization_vars, extent_vars, heading_vars, stable_index, mask=cur_mask)
-            metrics['DISTANCE_BREAKDOWN']['CONFIDENCE_VARIATION_%s_%d' % (class_name, idx)] = (1 - np.abs(_confidence)).mean()
-            metrics['DISTANCE_BREAKDOWN']['LOCALIZATION_VARIATION_%s_%d' % (class_name, idx)] = _localization.mean()
-            metrics['DISTANCE_BREAKDOWN']['EXTENT_VARIATION_%s_%d' % (class_name, idx)] = _extent.mean()
-            metrics['DISTANCE_BREAKDOWN']['HEADING_VARIATION_%s_%d' % (class_name, idx)] = _heading.mean()
-            metrics['DISTANCE_BREAKDOWN']['STABLE_INDEX_%s_%d' % (class_name, idx)] = _stable_index.mean()
+            metrics['CONFIDENCE_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = (1 - np.abs(_confidence)).mean()
+            metrics['LOCALIZATION_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _localization.mean()
+            metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _extent.mean()
+            metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _heading.mean()
+            metrics['STABLE_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)] = _stable_index.mean()
     return metrics
 
 
@@ -301,17 +302,17 @@ def print_stable_index_results(metrics, class_names):
     metrics_str += '\n\n----------------------------------\n'
     metrics_str += f'Stable Index (BreakDown By Distance)'
     metrics_str += '\n----------------------------------\n'
-    d_metrics = metrics['DISTANCE_BREAKDOWN']
 
     for class_name in class_names:
         for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
+            MIN, MAX = distance
             metrics_data_print.append([class_name if idx == 0 else '', 
                             ['<30', '30-50', '>50'][idx],
-                            f"{d_metrics['STABLE_INDEX_%s_%d' % (class_name, idx)]:.4f}",
-                            f"{d_metrics['CONFIDENCE_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
-                            f"{d_metrics['LOCALIZATION_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
-                            f"{d_metrics['EXTENT_VARIATION_%s_%d' % (class_name, idx)]:.4f}",
-                            f"{d_metrics['HEADING_VARIATION_%s_%d' % (class_name, idx)]:.4f}"])
+                            f"{metrics['STABLE_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}",
+                            f"{metrics['CONFIDENCE_VARIATION_%s_%d_to_%s' % (class_name, MIN, MAX)]:.4f}",
+                            f"{metrics['LOCALIZATION_VARIATION_%s_%d_to_%s' % (class_name, MIN, MAX)]:.4f}",
+                            f"{metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}",
+                            f"{metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}"])
         metrics_data_print += '\n'
     metrics_str += tabulate(metrics_data_print, headers=['class', 'dist.', 'SI', 'confidence', 'localization', 
                                                          'extent', 'heading'], tablefmt='orgtbl')                            
