@@ -12,6 +12,8 @@ Furthermore, we examine the effectiveness of PCL with the widely-used CenterPoin
 We hope our work could serve as a reliable baseline and draw the community's attention to this crucial issue in 3D object detection.
 Codes will be made publicly available.
 
+![structure](docs/structure.png)
+
 ## Demos
 <table>
   <tr>
@@ -330,7 +332,11 @@ We could not provide the above pretrained models due to [Waymo Dataset License A
   </tr>
 </tbody>
 </table>
+</details>
 
+<details>
+<summary> Analysis on Waymo Open Dataset </summary>
+<image src='docs/analysis.jpg'>
 </details>
 
 
