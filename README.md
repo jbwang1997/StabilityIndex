@@ -13,51 +13,32 @@ We hope our work could serve as a reliable baseline and draw the community's att
 Codes will be made publicly available.
 
 ## Demos
-<!-- 
-<table class='tg'>
-<tbody>
+<table>
   <tr>
     <td align="center">Confidence</td>
     <td align="center">Localization</td>
   </tr>
-</tbody>
-<tbody>
   <tr>
-    <td align="center">
-      <video width="300" height="150" controls>
-        <source src="docs/demo_confidence.mp4" type="video/mp4">
-      </video>
+    <td align="center"> 
+      <img src="docs/demo_confidence.gif">
     </td>
     <td align="center">
-      <video width="300" height="150" controls>
-        <source src="docs/demo_localization.mp4" type="video/mp4">
-      </video>
+      <img src="docs/demo_localization.gif">
     </td>
   </tr>
-</tbody>
-<tbody>
   <tr>
     <td align="center">Extent</td>
     <td align="center">Heading</td>
   </tr>
-</tbody>
-<tbody>
   <tr>
     <td align="center">
-      <video width="300" height="150" controls>
-        <source src="docs/demo_extent.mp4" type="video/mp4">
-      </video>
+      <img src="docs/demo_extent.gif">
     </td>
     <td align="center">
-      <video width="300" height="150" controls>
-        <source src="docs/demo_heading.mp4" type="video/mp4">
-      </video>
+      <img src="docs/demo_heading.gif">
     </td>
   </tr>
-</tbody>
-</table> -->
-
-<video src="docs/demo_confidence.mp4"> </video>
+</table>
 
 ## Main Results
 
