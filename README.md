@@ -13,7 +13,7 @@ We hope our work could serve as a reliable baseline and draw the community's att
 Codes will be made publicly available.
 
 ## Demos
-
+<!-- 
 <table class='tg'>
 <tbody>
   <tr>
@@ -37,8 +37,8 @@ Codes will be made publicly available.
 </tbody>
 <tbody>
   <tr>
-    <td align="center">Confidence</td>
-    <td align="center">Localization</td>
+    <td align="center">Extent</td>
+    <td align="center">Heading</td>
   </tr>
 </tbody>
 <tbody>
@@ -55,7 +55,9 @@ Codes will be made publicly available.
     </td>
   </tr>
 </tbody>
-</table>
+</table> -->
+
+<video src="docs/demo_confidence.mp4"> </video>
 
 ## Main Results
 
