@@ -1,18 +1,61 @@
 # Towards Stable 3D Object Detection
 
-## Introduction
+## Abstract
 
-In autonomous driving, the temporal stability of 3D object detection will significantly impact downstream tasks (*e.g.*, tracking and planning), and is therefore crucial for safety driving.
-The detection stability however cannot be accessed by existing metrics, like mAP and MOTA, and consequently is less explored by the community.
-To bridge this gap, this work proposes the *Stable Index* (*SI*), a new metric that can comprehensively evaluate the stability of 3D detectors in terms of confidence, box localization, extent, and heading.
-We further introduce a general and effective training strategy, called *Prediction Consistency Learning* (*PCL*).
+In autonomous driving, the temporal stability of 3D object detection greatly impacts the driving safety.
+However, the detection stability cannot be accessed by existing metrics such as mAP and MOTA, and consequently is less explored by the community.
+To bridge this gap, this work proposes **Stability Index (SI)**, a new metric that can comprehensively evaluate the stability of 3D detectors in terms of confidence, box localization, extent, and heading.
+By benchmarking state-of-the-art object detectors on the Waymo Open Dataset, SI reveals interesting properties of object stability that have not been previously discovered by other metrics.
+To help models improve their stability, we further introduce a general and effective training strategy, called **Prediction Consistency Learning (PCL)**.
 PCL essentially encourages the prediction consistency of the same objects under different timestamps and augmentations, leading to enhanced detection stability. 
-By benchmarking current object detectors on the Waymo Open Dataset, SI reveals several interesting properties of object stability that have been previously overlooked by other metrics.
-Furthermore, we examine the effectiveness of PCL with the popular CenterPoint, and achieve a remarkable 85.13\% SI for class vehicle, surpassing the baseline by 5.36\%.
-We hope our work could serve as a reliable baseline and draw the committee's attention to the crucial issue in 3D object detection.
-Code will be made publicly available.
+Furthermore, we examine the effectiveness of PCL with the widely-used CenterPoint, and achieve a remarkable SI of 86.00 for vehicle class, surpassing the baseline by 5.48.
+We hope our work could serve as a reliable baseline and draw the community's attention to this crucial issue in 3D object detection.
+Codes will be made publicly available.
 
 ## Demos
+
+<table class='tg'>
+<tbody>
+  <tr>
+    <td align="center">Confidence</td>
+    <td align="center">Localization</td>
+  </tr>
+</tbody>
+<tbody>
+  <tr>
+    <td align="center">
+      <video width="300" height="150" controls>
+        <source src="docs/demo_confidence.mp4" type="video/mp4">
+      </video>
+    </td>
+    <td align="center">
+      <video width="300" height="150" controls>
+        <source src="docs/demo_localization.mp4" type="video/mp4">
+      </video>
+    </td>
+  </tr>
+</tbody>
+<tbody>
+  <tr>
+    <td align="center">Confidence</td>
+    <td align="center">Localization</td>
+  </tr>
+</tbody>
+<tbody>
+  <tr>
+    <td align="center">
+      <video width="300" height="150" controls>
+        <source src="docs/demo_extent.mp4" type="video/mp4">
+      </video>
+    </td>
+    <td align="center">
+      <video width="300" height="150" controls>
+        <source src="docs/demo_heading.mp4" type="video/mp4">
+      </video>
+    </td>
+  </tr>
+</tbody>
+</table>
 
 ## Main Results
 
