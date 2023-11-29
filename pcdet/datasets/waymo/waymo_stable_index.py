@@ -252,9 +252,7 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
         assert mask is not None
         return [arg[mask] for arg in args]
 
-    metrics['DISTANCE_BREAKDOWN'] = {}
     distances = np.linalg.norm(paired_infos['cur_det_boxes3d'][:, :3], axis=1)
-    
     for class_name in class_names:
         class_mask = paired_infos['gt_names'] == class_name
         _confidence, _localization, _extent, _heading, _stable_index = get_values_by_mask(
