@@ -3,15 +3,46 @@ import copy
 import pickle
 import argparse
 import numpy as np
+
+from nuscenes.nuscenes import NuScenes
+from nuscenes.utils.data_classes import Box
+from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_aligned_iou3d_gpu, boxes_iou3d_gpu
+
 from collections import defaultdict
+from pyquaternion import Quaternion
 from scipy.optimize import linear_sum_assignment
-from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou_bev, boxes_aligned_iou3d_gpu, boxes_iou3d_gpu
-from torch_scatter import scatter_max
 from tqdm import tqdm
 from tabulate import tabulate
 import datetime
 
 MAX_IOU_BATCH = 100000
+
+
+map_name_from_general_to_detection = {
+    'human.pedestrian.adult': 'pedestrian',
+    'human.pedestrian.child': 'pedestrian',
+    'human.pedestrian.wheelchair': 'ignore',
+    'human.pedestrian.stroller': 'ignore',
+    'human.pedestrian.personal_mobility': 'ignore',
+    'human.pedestrian.police_officer': 'pedestrian',
+    'human.pedestrian.construction_worker': 'pedestrian',
+    'animal': 'ignore',
+    'vehicle.car': 'car',
+    'vehicle.motorcycle': 'motorcycle',
+    'vehicle.bicycle': 'bicycle',
+    'vehicle.bus.bendy': 'bus',
+    'vehicle.bus.rigid': 'bus',
+    'vehicle.truck': 'truck',
+    'vehicle.construction': 'construction_vehicle',
+    'vehicle.emergency.ambulance': 'ignore',
+    'vehicle.emergency.police': 'ignore',
+    'vehicle.trailer': 'trailer',
+    'movable_object.barrier': 'barrier',
+    'movable_object.trafficcone': 'traffic_cone',
+    'movable_object.pushable_pullable': 'ignore',
+    'movable_object.debris': 'ignore',
+    'static_object.bicycle_rack': 'ignore',
+}
 
 
 def get_localization_variations(cur_biases, pre_biases, gts):
@@ -125,20 +156,10 @@ def align_det_and_gt_by_hungarian(det_boxes, det_scores, det_names, gt_boxes, gt
     return aligned_boxes, aligned_scores
 
 
-def generate_gt_box_mask(info, class_names):
-    box_mask = np.array([n in class_names for n in info['name']], dtype=np.bool_)
-    zero_difficulty_mask = info['difficulty'] == 0
-    info['difficulty'][(info['num_points_in_gt'] > 5) & zero_difficulty_mask] = 1
-    info['difficulty'][(info['num_points_in_gt'] <= 5) & zero_difficulty_mask] = 2
-    nonzero_mask = info['num_points_in_gt'] > 0
-    box_mask = box_mask & nonzero_mask
-    return box_mask
-
-
-def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names):
+def eval_nuscenes_stability_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names=None):
     assert len(cur_det_annos) == len(pre_det_annos) == len(cur_gt_annos) == len(pre_gt_annos), \
         'The number of gt and pred should be aligned.'
-
+    
     cur_det_annos = copy.deepcopy(cur_det_annos)
     pre_det_annos = copy.deepcopy(pre_det_annos)
     cur_gt_annos = copy.deepcopy(cur_gt_annos)
@@ -149,20 +170,16 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
         cur_gt_anno, pre_gt_anno = cur_gt_annos[idx], pre_gt_annos[idx]
         cur_det_anno, pre_det_anno = cur_det_annos[idx], pre_det_annos[idx]
 
-        # prepare gt boxes3d
-        cur_box_mask = generate_gt_box_mask(cur_gt_anno, class_names)
-        pre_box_mask = generate_gt_box_mask(pre_gt_anno, class_names)
-
-        cur_gt_obj_ids = cur_gt_anno['obj_ids'][cur_box_mask]
-        pre_gt_obj_ids = pre_gt_anno['obj_ids'][pre_box_mask]
+        cur_gt_obj_ids = cur_gt_anno['instance_tokens']
+        pre_gt_obj_ids = pre_gt_anno['instance_tokens']
         if cur_gt_obj_ids.shape[0] == 0 or pre_gt_obj_ids.shape[0] == 0:
             continue
         cur_align_idx, pre_align_idx = np.nonzero(
             cur_gt_obj_ids[:, None] == pre_gt_obj_ids[None, :])
 
         # sample gt boxes3d
-        cur_gt_boxes3d = cur_gt_anno['gt_boxes_lidar'][cur_box_mask][cur_align_idx]
-        pre_gt_boxes3d = pre_gt_anno['gt_boxes_lidar'][pre_box_mask][pre_align_idx]
+        cur_gt_boxes3d = cur_gt_anno['boxes'][cur_align_idx]
+        pre_gt_boxes3d = pre_gt_anno['boxes'][pre_align_idx]
         assert cur_gt_boxes3d.shape[0] == pre_gt_boxes3d.shape[0]
         if cur_gt_boxes3d.shape[0] == 0:
             continue
@@ -172,14 +189,10 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
         if pre_gt_boxes3d.shape[-1] == 9:
             pre_gt_boxes3d = pre_gt_boxes3d[:, :7]
         # sample name
-        gt_names = cur_gt_anno['name'][cur_box_mask][cur_align_idx]
-        # sample difficulty
-        cur_difficulty = cur_gt_anno['difficulty'][cur_box_mask][cur_align_idx]
-        pre_difficulty = pre_gt_anno['difficulty'][pre_box_mask][pre_align_idx]
-        difficulty = np.maximum(cur_difficulty, pre_difficulty)
+        gt_names = cur_gt_anno['gt_names'][cur_align_idx]
         # sample num_points_in_gt
-        cur_num_points = cur_gt_anno['num_points_in_gt'][cur_box_mask][cur_align_idx]
-        pre_num_points = pre_gt_anno['num_points_in_gt'][pre_box_mask][pre_align_idx]
+        cur_num_points = cur_gt_anno['num_lidar_pts'][cur_align_idx]
+        pre_num_points = pre_gt_anno['num_lidar_pts'][pre_align_idx]
         num_points_in_gt = ((cur_num_points + pre_num_points) / 2).astype(np.int64)
 
         # prepare detected boxes3d
@@ -202,7 +215,6 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
 
         paired_infos['cur_gt_boxes3d'].append(cur_gt_boxes3d)
         paired_infos['pre_gt_boxes3d'].append(pre_gt_boxes3d)
-        paired_infos['difficult'].append(difficulty)
         paired_infos['num_points_in_gt'].append(num_points_in_gt)
         paired_infos['cur_det_boxes3d'].append(cur_det_boxes3d)
         paired_infos['cur_det_scores'].append(cur_det_scores)
@@ -231,7 +243,7 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
     cur_det_biases = align_bias_into_horizon(cur_dets, cur_gts)
     pre_det_biases = align_bias_into_horizon(pre_dets, pre_gts)
     
-    # calculate stable index
+    # calculate stability index
     metrics = dict()
     confidence_vars = paired_infos['cur_det_scores'] - paired_infos['pre_det_scores']
     confidence_vars = confidence_vars / (np.quantile(paired_infos['cur_det_scores'], 0.99) - \
@@ -240,13 +252,13 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
     extent_vars = get_extent_variations(cur_det_biases, pre_det_biases, norm_gts)
     heading_vars = get_heading_variations(cur_det_biases, pre_det_biases, norm_gts)
 
-    stable_index = (1 - np.abs(confidence_vars)) * (localization_vars + extent_vars + heading_vars) / 3
+    stability_index = (1 - np.abs(confidence_vars)) * (localization_vars + extent_vars + heading_vars) / 3
 
     paired_infos['confidence_vars'] = confidence_vars
     paired_infos['localization_vars'] = localization_vars
     paired_infos['extent_vars'] = extent_vars
     paired_infos['heading_vars'] = heading_vars
-    paired_infos['stable_index'] = stable_index
+    paired_infos['stability_index'] = stability_index
 
     def get_values_by_mask(*args, mask=None):
         assert mask is not None
@@ -255,38 +267,33 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
     distances = np.linalg.norm(paired_infos['cur_det_boxes3d'][:, :3], axis=1)
     for class_name in class_names:
         class_mask = paired_infos['gt_names'] == class_name
-        _confidence, _localization, _extent, _heading, _stable_index = get_values_by_mask(
-            confidence_vars, localization_vars, extent_vars, heading_vars, stable_index, mask=class_mask)
+        _confidence, _localization, _extent, _heading, _stability_index = get_values_by_mask(
+            confidence_vars, localization_vars, extent_vars, heading_vars, stability_index, mask=class_mask)
         metrics['CONFIDENCE_VARIATION_%s' % class_name] = (1 - np.abs(_confidence)).mean()
         metrics['LOCALIZATION_VARIATION_%s' % class_name] = _localization.mean()
         metrics['EXTENT_VARIATION_%s' % class_name] = _extent.mean()
         metrics['HEADING_VARIATION_%s' % class_name] = _heading.mean()
-        metrics['STABLE_INDEX_%s' % class_name] = _stable_index.mean()
+        metrics['STABILITY_INDEX_%s' % class_name] = _stability_index.mean()
         
-        for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
-            MIN, MAX = distance
-            distance_mask = (distances > MIN) & (distances <= MAX)
-            cur_mask = class_mask & distance_mask
-            _confidence, _localization, _extent, _heading, _stable_index = get_values_by_mask(
-                confidence_vars, localization_vars, extent_vars, heading_vars, stable_index, mask=cur_mask)
-            metrics['CONFIDENCE_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = (1 - np.abs(_confidence)).mean()
-            metrics['LOCALIZATION_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _localization.mean()
-            metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _extent.mean()
-            metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _heading.mean()
-            metrics['STABLE_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)] = _stable_index.mean()
+    # Calculate mean stability index
+    for si_type in ['CONFIDENCE_VARIATION', 'LOCALIZATION_VARIATION', 'EXTENT_VARIATION',
+                    'HEADING_VARIATION', 'STABILITY_INDEX']:
+        collector = [metrics['%s_%s' % (si_type, class_name)] for class_name in class_names]
+        metrics['%s_mean' % si_type] = sum(collector) / len(collector)
+
     return metrics
 
 
-def print_stable_index_results(metrics, class_names):
+def print_stability_index_results(metrics, class_names):
     metrics_str = ''
     metrics_str += '\n----------------------------------\n'
-    metrics_str += f'Stable Index (Overall)'
+    metrics_str += f'Stability Index (Overall)'
     metrics_str += '\n----------------------------------\n'
 
     metrics_data_print = []
-    for class_name in class_names:
+    for class_name in [*class_names, 'mean']:
         metrics_data_print.append([class_name, 
-                                   f"{metrics['STABLE_INDEX_%s' % class_name]:.4f}", 
+                                   f"{metrics['STABILITY_INDEX_%s' % class_name]:.4f}", 
                                    f"{metrics['CONFIDENCE_VARIATION_%s' % class_name]:.4f}",
                                    f"{metrics['LOCALIZATION_VARIATION_%s' % class_name]:.4f}",
                                    f"{metrics['EXTENT_VARIATION_%s' % class_name]:.4f}",
@@ -294,68 +301,98 @@ def print_stable_index_results(metrics, class_names):
     metrics_str += tabulate(metrics_data_print, headers=['class', 'SI', 'confidence', 
                                                         'localization', 'extent',
                                                         'heading'], tablefmt='orgtbl')
-
-    # print distance breakdown    
-    metrics_data_print = []                                                    
-    metrics_str += '\n\n----------------------------------\n'
-    metrics_str += f'Stable Index (BreakDown By Distance)'
-    metrics_str += '\n----------------------------------\n'
-
-    for class_name in class_names:
-        for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
-            MIN, MAX = distance
-            metrics_data_print.append([class_name if idx == 0 else '', 
-                            ['<30', '30-50', '>50'][idx],
-                            f"{metrics['STABLE_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}",
-                            f"{metrics['CONFIDENCE_VARIATION_%s_%d_to_%s' % (class_name, MIN, MAX)]:.4f}",
-                            f"{metrics['LOCALIZATION_VARIATION_%s_%d_to_%s' % (class_name, MIN, MAX)]:.4f}",
-                            f"{metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}",
-                            f"{metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)]:.4f}"])
-        metrics_data_print += '\n'
-    metrics_str += tabulate(metrics_data_print, headers=['class', 'dist.', 'SI', 'confidence', 'localization', 
-                                                         'extent', 'heading'], tablefmt='orgtbl')                            
-
-
     return metrics_str
+
+
+def parse_nuscenes_data(nusc, pred_infos, interval=1):
+    scenes_collector = defaultdict(list)
+    for pred_info in pred_infos:
+        sample_token = pred_info['metadata']['token']
+        gt_sample = nusc.get('sample', sample_token)
+        scene_token = gt_sample['scene_token']
+        scenes_collector[scene_token].append([gt_sample, pred_info])
+    
+    cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos = [], [], [], []
+    for scene_token, info_list in tqdm(list(scenes_collector.items())):
+        info_list = sorted(info_list, key=lambda x: x[0]['timestamp'])
+        scene_gt_samples, scene_pred_infos = list(zip(*info_list))
+
+        scene_gt_infos = []
+        for sample in scene_gt_samples:
+            sd_record = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+            cs_record = nusc.get('calibrated_sensor', sd_record['calibrated_sensor_token'])
+            pose_record = nusc.get('ego_pose', sd_record['ego_pose_token'])
+
+            boxes, instance_tokens, num_lidar_pts, gt_names = [], [], [], []
+            for anno_token in sample['anns']:
+                record = nusc.get('sample_annotation', anno_token)
+                gt_name = map_name_from_general_to_detection[record['category_name']]
+                if gt_name == 'ignore' or record['num_lidar_pts'] < 1:
+                    continue
+                
+                gt_names.append(gt_name)
+                instance_tokens.append(record['instance_token'])
+                num_lidar_pts.append(record['num_lidar_pts'])
+                box = Box(record['translation'], record['size'], Quaternion(record['rotation']),
+                          name=record['category_name'], token=record['token'])
+                box.velocity = nusc.box_velocity(box.token)
+                # Move box to ego vehicle coord system
+                box.translate(-np.array(pose_record['translation']))
+                box.rotate(Quaternion(pose_record['rotation']).inverse)
+                # Move box to sensor coord system
+                box.translate(-np.array(cs_record['translation']))
+                box.rotate(Quaternion(cs_record['rotation']).inverse)
+
+                v = np.dot(box.orientation.rotation_matrix, np.array([1, 0, 0]))
+                yaw = np.arctan2(v[[1]], v[[0]])
+                boxes.append(np.concatenate([box.center, box.wlh, yaw, box.velocity[:2]]))
+            
+            boxes = np.stack(boxes, axis=0) if boxes else np.zeros((0, 9), dtype=np.float32)
+            instance_tokens = np.array(instance_tokens, dtype=np.dtype('<U32')) \
+                if instance_tokens else np.zeros((0, ), dtype=np.dtype('<U32'))
+            num_lidar_pts = np.array(num_lidar_pts, dtype=np.int) if num_lidar_pts \
+                else np.zeros((0, ), dtype=np.int)
+            gt_names = np.array(gt_names, dtype=np.dtype('<U20')) if gt_names \
+                else np.zeros((0, ), dtype=np.dtype('<U20'))
+            scene_gt_infos.append(dict(
+                boxes=boxes, instance_tokens=instance_tokens, 
+                num_lidar_pts=num_lidar_pts, gt_names=gt_names,
+                token=sample['token'], timestamp=sample['timestamp']))
+
+        cur_det_annos.extend(scene_pred_infos[interval:])
+        cur_gt_annos.extend(scene_gt_infos[interval:])
+        pre_det_annos.extend(scene_pred_infos[:-interval])
+        pre_gt_annos.extend(scene_gt_infos[:-interval])
+    
+    assert len(cur_det_annos) == len(pre_det_annos) == len(cur_gt_annos) == len(pre_gt_annos)
+    return cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos
 
 
 def main():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--pred_infos', type=str, default=None, help='pickle file')
-    parser.add_argument('--gt_infos', type=str, default=None, help='pickle file')
-    parser.add_argument('--class_names', type=str, nargs='+', default=['Vehicle', 'Pedestrian', 'Cyclist'], help='')
-    parser.add_argument('--sampled_interval', type=int, default=5, help='sampled interval for GT sequences')
+    parser.add_argument('--data_root', type=str, default=None, help='nuscenes data path')
+    parser.add_argument('--version', type=str, default=None, help='nuscenes version')
+    parser.add_argument('--class_names', type=str, nargs='+', 
+                        default=['car','truck', 'construction_vehicle', 'bus',
+                                 'trailer', 'barrier', 'motorcycle', 'bicycle',
+                                 'pedestrian', 'traffic_cone'])
+    parser.add_argument('--interval', type=int, default=2, help='sampled interval for GT sequences')
     args = parser.parse_args()
 
+    nusc = NuScenes(version=args.version, dataroot=args.data_root)
     pred_infos = pickle.load(open(args.pred_infos, 'rb'))
-    gt_infos = pickle.load(open(args.gt_infos, 'rb'))
 
-    frame_id_mapper = {info['frame_id']: i for i, info in enumerate(gt_infos)}
-    cur_det_annos, pre_det_annos = [], []
-    cur_gt_annos, pre_gt_annos = [], []
-    for i, info in enumerate(gt_infos):
-        sequence_name = info['point_cloud']['lidar_sequence']
-        sample_idx = info['point_cloud']['sample_idx']
-        # filter out frame withous previous information
-        pre_sample_idx = sample_idx - 5
-        pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
-        if pre_frame_idx not in frame_id_mapper:
-            continue
-
-        cur_det_annos.append(pred_infos[i])
-        cur_gt_annos.append(gt_infos[i]['annos'])
-        pre_det_annos.append(pred_infos[frame_id_mapper[pre_frame_idx]])
-        pre_gt_annos.append(gt_infos[frame_id_mapper[pre_frame_idx]]['annos'])
-
-    stable_index = eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, args.class_names)
-    stable_index_str = print_stable_index_results(stable_index, args.class_names)
-    print(stable_index_str)
+    parsed_outputs = parse_nuscenes_data(nusc, pred_infos, interval=args.interval)
+    si_dict = eval_nuscenes_stability_index(*parsed_outputs, class_names=args.class_names)
+    si_str = print_stability_index_results(si_dict, args.class_names)
+    print(si_str)
 
     # save to file
     log_file = '/'.join(args.pred_infos.split('/')[:-1]) + f'/eval_si_%s.log' %datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     print('Save log file to %s' % log_file)
     with open(log_file, 'w') as f:
-        f.write(stable_index_str)
+        f.write(si_str)
 
 if __name__ == '__main__':
     main()

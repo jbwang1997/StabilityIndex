@@ -699,7 +699,7 @@ class WaymoDataset(DatasetTemplate):
             ap_result_str, ap_dict = kitti_eval(eval_det_annos, eval_gt_annos)
         elif kwargs['eval_metric'] == 'waymo':
             ap_result_str, ap_dict = waymo_eval(eval_det_annos, eval_gt_annos)
-        elif kwargs['eval_metric'] == 'stable_index':
+        elif kwargs['eval_metric'] == 'stability_index':
             frame_id_mapper = {info['frame_id']: i for i, info in enumerate(self.infos)}
             cur_det_annos, pre_det_annos = [], []
             cur_gt_annos, pre_gt_annos = [], []
@@ -717,11 +717,11 @@ class WaymoDataset(DatasetTemplate):
                 pre_det_annos.append(eval_det_annos[frame_id_mapper[pre_frame_idx]])
                 pre_gt_annos.append(eval_gt_annos[frame_id_mapper[pre_frame_idx]])
 
-            from .waymo_stable_index import eval_waymo_stable_index
-            from .waymo_stable_index import print_stable_index_results
-            ap_dict = eval_waymo_stable_index(
+            from .waymo_stability_index import eval_waymo_stability_index
+            from .waymo_stability_index import print_stability_index_results
+            ap_dict = eval_waymo_stability_index(
                 cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, class_names=class_names)
-            ap_result_str = print_stable_index_results(ap_dict, class_names)
+            ap_result_str = print_stability_index_results(ap_dict, class_names)
         else:
             raise NotImplementedError
 

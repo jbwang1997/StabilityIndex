@@ -278,35 +278,43 @@ class NuScenesDataset(DatasetTemplate):
         if self.dataset_cfg.VERSION == 'v1.0-test':
             return 'No ground-truth annotations for evaluation', {}
 
-        from nuscenes.eval.detection.config import config_factory
-        from nuscenes.eval.detection.evaluate import NuScenesEval
+        if kwargs['eval_metric'] == 'stability_index':
+            from .nuscenes_stability_index import parse_nuscenes_data
+            from .nuscenes_stability_index import eval_nuscenes_stability_index
+            from .nuscenes_stability_index import print_stability_index_results
+            parsed_outputs = parse_nuscenes_data(nusc, det_annos, interval=2)
+            result_dict = eval_nuscenes_stability_index(*parsed_outputs, class_names=self.class_names)
+            result_str = print_stability_index_results(result_dict, self.class_names)
+        else:
+            from nuscenes.eval.detection.config import config_factory
+            from nuscenes.eval.detection.evaluate import NuScenesEval
 
-        eval_set_map = {
-            'v1.0-mini': 'mini_val',
-            'v1.0-trainval': 'val',
-            'v1.0-test': 'test'
-        }
-        try:
-            eval_version = 'detection_cvpr_2019'
-            eval_config = config_factory(eval_version)
-        except:
-            eval_version = 'cvpr_2019'
-            eval_config = config_factory(eval_version)
+            eval_set_map = {
+                'v1.0-mini': 'mini_val',
+                'v1.0-trainval': 'val',
+                'v1.0-test': 'test'
+            }
+            try:
+                eval_version = 'detection_cvpr_2019'
+                eval_config = config_factory(eval_version)
+            except:
+                eval_version = 'cvpr_2019'
+                eval_config = config_factory(eval_version)
 
-        nusc_eval = NuScenesEval(
-            nusc,
-            config=eval_config,
-            result_path=res_path,
-            eval_set=eval_set_map[self.dataset_cfg.VERSION],
-            output_dir=str(output_path),
-            verbose=True,
-        )
-        metrics_summary = nusc_eval.main(plot_examples=0, render_curves=False)
+            nusc_eval = NuScenesEval(
+                nusc,
+                config=eval_config,
+                result_path=res_path,
+                eval_set=eval_set_map[self.dataset_cfg.VERSION],
+                output_dir=str(output_path),
+                verbose=True,
+            )
+            metrics_summary = nusc_eval.main(plot_examples=0, render_curves=False)
 
-        with open(output_path / 'metrics_summary.json', 'r') as f:
-            metrics = json.load(f)
+            with open(output_path / 'metrics_summary.json', 'r') as f:
+                metrics = json.load(f)
 
-        result_str, result_dict = nuscenes_utils.format_nuscene_results(metrics, self.class_names, version=eval_version)
+            result_str, result_dict = nuscenes_utils.format_nuscene_results(metrics, self.class_names, version=eval_version)
         return result_str, result_dict
 
     def create_groundtruth_database(self, used_classes=None, max_sweeps=10):
