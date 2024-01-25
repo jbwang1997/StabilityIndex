@@ -235,7 +235,7 @@ def eval_waymo_stable_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_a
     metrics = dict()
     confidence_vars = paired_infos['cur_det_scores'] - paired_infos['pre_det_scores']
     confidence_vars = confidence_vars / (np.quantile(paired_infos['cur_det_scores'], 0.99) - \
-        np.quantile(paired_infos['cur_det_scores'], 0.01))
+        np.quantile(paired_infos['cur_det_scores'], 0.01) + 1e-5)
     localization_vars = get_localization_variations(cur_det_biases, pre_det_biases, norm_gts)
     extent_vars = get_extent_variations(cur_det_biases, pre_det_biases, norm_gts)
     heading_vars = get_heading_variations(cur_det_biases, pre_det_biases, norm_gts)
@@ -339,7 +339,7 @@ def main():
         sequence_name = info['point_cloud']['lidar_sequence']
         sample_idx = info['point_cloud']['sample_idx']
         # filter out frame withous previous information
-        pre_sample_idx = sample_idx - 5
+        pre_sample_idx = sample_idx - args.sampled_interval
         pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
         if pre_frame_idx not in frame_id_mapper:
             continue
