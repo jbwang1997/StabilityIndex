@@ -502,7 +502,7 @@ If you has tested the model and got the `result.pkl` in `output`, you can direct
 ```
 python pcdet/datasets/waymo/waymo_stable_index.py \
     --gt_infos data/waymo/waymo_processed_data_v0_5_0_infos_val.pkl \
-    --pred_infos output/waymo_stable/centerpoint_PCL_n16/default/eval/eval_with_train/epoch_5/result.py
+    --pred_infos output/waymo_stable/centerpoint_PCL_n16/default/eval/eval_with_train/epoch_5/result.pkl
 ```
 
 ## Acknowledgement
