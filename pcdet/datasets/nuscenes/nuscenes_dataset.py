@@ -1,6 +1,7 @@
 import copy
 import pickle
 from pathlib import Path
+from collections import defaultdict
 
 import numpy as np
 from tqdm import tqdm
@@ -81,6 +82,24 @@ class NuScenesDataset(DatasetTemplate):
         cls_dist_new = {k: len(v) / len(sampled_infos) for k, v in cls_infos_new.items()}
 
         return sampled_infos
+
+    def group_idx_by_seq(self):
+        scene_collector = defaultdict(list)
+        for i in range(len(self)):
+            info = self.infos[i % len(self.infos)]
+            scene_token = info['scene_token']
+            timestamp = info['timestamp']
+            scene_collector[scene_token + '_%d' % (i // len(self.infos))].append(
+                dict(timestamp=timestamp, index=i))
+
+        seq_groups = []
+        for scene_name, sample_infos in scene_collector.items():
+            timestamps = np.array([info['timestamp'] for info in sample_infos])
+            index = np.array([info['index'] for info in sample_infos])
+            index = index[np.argsort(timestamps)]
+            seq_groups.append(index.tolist())
+        assert len(self) == sum([len(group) for group in seq_groups])
+        return seq_groups
 
     def get_sweep(self, sweep_info):
         def remove_ego_points(points, center_radius=1.0):
@@ -215,7 +234,66 @@ class NuScenesDataset(DatasetTemplate):
 
         return len(self.infos)
 
-    def __getitem__(self, index):
+    def prepare_data(self, data_dict):
+        """
+        Args:
+            data_dict:
+                points: optional, (N, 3 + C_in)
+                gt_boxes: optional, (N, 7 + C) [x, y, z, dx, dy, dz, heading, ...]
+                gt_names: optional, (N), string
+                ...
+
+        Returns:
+            data_dict:
+                frame_id: string
+                points: (N, 3 + C_in)
+                gt_boxes: optional, (N, 7 + C) [x, y, z, dx, dy, dz, heading, ...]
+                gt_names: optional, (N), string
+                use_lead_xyz: bool
+                voxels: optional (num_voxels, max_points_per_voxel, 3 + C)
+                voxel_coords: optional (num_voxels, 3)
+                voxel_num_points: optional (num_voxels)
+                ...
+        """
+        if self.training:
+            assert 'gt_boxes' in data_dict, 'gt_boxes should be provided for training'
+            gt_boxes_mask = np.array([n in self.class_names for n in data_dict['gt_names']], dtype=np.bool_)
+            
+            if 'calib' in data_dict:
+                calib = data_dict['calib']
+            data_dict = self.data_augmentor.forward(
+                data_dict={
+                    **data_dict,
+                    'gt_boxes_mask': gt_boxes_mask
+                }
+            )
+            if 'calib' in data_dict:
+                data_dict['calib'] = calib
+        data_dict = self.set_lidar_aug_matrix(data_dict)
+        if data_dict.get('gt_boxes', None) is not None:
+            selected = common_utils.keep_arrays_by_name(data_dict['gt_names'], self.class_names)
+            data_dict['gt_boxes'] = data_dict['gt_boxes'][selected]
+            data_dict['gt_names'] = data_dict['gt_names'][selected]
+            gt_classes = np.array([self.class_names.index(n) + 1 for n in data_dict['gt_names']], dtype=np.int32)
+            gt_boxes = np.concatenate((data_dict['gt_boxes'], gt_classes.reshape(-1, 1).astype(np.float32)), axis=1)
+            data_dict['gt_boxes'] = gt_boxes
+
+            if 'gt_ids' in data_dict:
+                data_dict['gt_ids'] = data_dict['gt_ids'][selected]
+            if 'num_points_in_gt' in data_dict:
+                data_dict['num_points_in_gt'] = data_dict['num_points_in_gt'][selected]
+            if data_dict.get('gt_boxes2d', None) is not None:
+                data_dict['gt_boxes2d'] = data_dict['gt_boxes2d'][selected]
+
+        if data_dict.get('points', None) is not None:
+            data_dict = self.point_feature_encoder.forward(data_dict)
+
+        data_dict = self.data_processor.forward(data_dict=data_dict)
+
+        data_dict.pop('gt_names', None)
+        return data_dict
+
+    def helper_getitem(self, index):
         if self._merge_all_iters_to_one_epoch:
             index = index % len(self.infos)
 
@@ -238,6 +316,10 @@ class NuScenesDataset(DatasetTemplate):
                 'gt_names': info['gt_names'] if mask is None else info['gt_names'][mask],
                 'gt_boxes': info['gt_boxes'] if mask is None else info['gt_boxes'][mask]
             })
+            if self.dataset_cfg.get('LOAD_OBJ_IDS', False):
+                gt_ids = info['gt_ids']
+                input_dict['gt_ids'] = info['gt_ids'] if mask is None else info['gt_ids'][mask]
+
         if self.use_camera:
             input_dict = self.load_camera_info(input_dict, info)
 
@@ -252,6 +334,165 @@ class NuScenesDataset(DatasetTemplate):
             data_dict['gt_boxes'] = data_dict['gt_boxes'][:, [0, 1, 2, 3, 4, 5, 6, -1]]
 
         return data_dict
+
+    def __getitem__(self, index):
+        data_dict = self.helper_getitem(index)
+
+        if self.training and len(data_dict['gt_boxes']) == 0:
+            new_index = np.random.randint(self.__len__())
+            return self.__getitem__(new_index)
+
+        if self.dataset_cfg.get('TWO_STREAM', False) and self.training:
+            max_itv = self.dataset_cfg.get('TWO_STREAM_MAX_INTERVAL', False)
+            interval = np.random.randint(-max_itv, max_itv + 1)
+            if not hasattr(self, 'seq_groups'):
+                self.seq_groups = self.group_idx_by_seq()
+            for seq_group in self.seq_groups:
+                if index in seq_group:
+                    break
+            idx_in_group = seq_group.index(index)
+            new_idx_in_group = max(0, min(idx_in_group + interval, len(seq_group) - 1))
+            index2 = seq_group[new_idx_in_group]
+            data_dict2 = self.helper_getitem(index2)
+
+            if len(data_dict2['gt_boxes']) == 0:
+                new_index = np.random.randint(self.__len__())
+                return self.__getitem__(new_index)
+
+            for key, val in data_dict2.items():
+                data_dict[f'{key}_two_stream'] = val
+            del data_dict2
+
+        return data_dict
+
+    @staticmethod
+    def collate_batch(batch_list, _unused=False):
+        data_dict = defaultdict(list)
+
+        batch_size_multiplier = 1
+        for cur_sample in batch_list:
+            for key, val in cur_sample.items():
+                if 'two_stream' not in key:
+                    data_dict[key].append(val)
+            for key, val in cur_sample.items():
+                if 'two_stream' in key:
+                    data_dict[key.replace('_two_stream', '')].append(val)
+                    batch_size_multiplier = 2
+
+        batch_size = len(batch_list) * batch_size_multiplier
+        ret = {}
+        batch_size_ratio = 1
+
+        for key, val in data_dict.items():
+            try:
+                if key in ['voxels', 'voxel_num_points']:
+                    if isinstance(val[0], list):
+                        batch_size_ratio = len(val[0])
+                        val = [i for item in val for i in item]
+                    ret[key] = np.concatenate(val, axis=0)
+                elif key in ['points', 'voxel_coords']:
+                    coors = []
+                    if isinstance(val[0], list):
+                        val =  [i for item in val for i in item]
+                    for i, coor in enumerate(val):
+                        coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
+                        coors.append(coor_pad)
+                    ret[key] = np.concatenate(coors, axis=0)
+                elif key in ['gt_boxes']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['gt_ids']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.dtype('<U22'))
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['num_points_in_gt']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__()] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['roi_boxes']:
+                    max_gt = max([x.shape[1] for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, val[0].shape[0], max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k,:, :val[k].shape[1], :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['roi_scores', 'roi_labels']:
+                    max_gt = max([x.shape[1] for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, val[0].shape[0], max_gt), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k,:, :val[k].shape[1]] = val[k]
+                    ret[key] = batch_gt_boxes3d
+
+                elif key in ['gt_boxes2d']:
+                    max_boxes = 0
+                    max_boxes = max([len(x) for x in val])
+                    batch_boxes2d = np.zeros((batch_size, max_boxes, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        if val[k].size > 0:
+                            batch_boxes2d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_boxes2d
+                elif key in ["images", "depth_maps"]:
+                    # Get largest image size (H, W)
+                    max_h = 0
+                    max_w = 0
+                    for image in val:
+                        max_h = max(max_h, image.shape[0])
+                        max_w = max(max_w, image.shape[1])
+
+                    # Change size of images
+                    images = []
+                    for image in val:
+                        pad_h = common_utils.get_pad_params(desired_size=max_h, cur_size=image.shape[0])
+                        pad_w = common_utils.get_pad_params(desired_size=max_w, cur_size=image.shape[1])
+                        pad_width = (pad_h, pad_w)
+                        pad_value = 0
+
+                        if key == "images":
+                            pad_width = (pad_h, pad_w, (0, 0))
+                        elif key == "depth_maps":
+                            pad_width = (pad_h, pad_w)
+
+                        image_pad = np.pad(image,
+                                           pad_width=pad_width,
+                                           mode='constant',
+                                           constant_values=pad_value)
+
+                        images.append(image_pad)
+                    ret[key] = np.stack(images, axis=0)
+                elif key in ['calib']:
+                    ret[key] = val
+                elif key in ["points_2d"]:
+                    max_len = max([len(_val) for _val in val])
+                    pad_value = 0
+                    points = []
+                    for _points in val:
+                        pad_width = ((0, max_len-len(_points)), (0,0))
+                        points_pad = np.pad(_points,
+                                pad_width=pad_width,
+                                mode='constant',
+                                constant_values=pad_value)
+                        points.append(points_pad)
+                    ret[key] = np.stack(points, axis=0)
+                elif key in ['camera_imgs']:
+                    ret[key] = torch.stack([torch.stack(imgs,dim=0) for imgs in val],dim=0)
+                else:
+                    ret[key] = np.stack(val, axis=0)
+            except:
+                print('Error in collate_batch: key=%s' % key)
+                raise TypeError
+
+        ret['batch_size'] = batch_size * batch_size_ratio
+        return ret
 
     def evaluation(self, det_annos, class_names, **kwargs):
         import json

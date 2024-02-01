@@ -350,6 +350,9 @@ class CenterPCLHead(nn.Module):
             for idx, pred_dict in enumerate(pred_dicts):
                 ind = target_dicts['inds'][idx] # indexes to gather infos
 
+                head_weights = alignment.get('HEAD_WEIGHT', None)
+                head_weight = 1.0 if head_weights is None else head_weights[idx]
+
                 # heatmaps
                 # make sure pred_dict['hm'] is already processed by sigmoid
                 assert pred_dict['hm'].max() <= 1 and pred_dict['hm'].min() >= 0
@@ -376,6 +379,9 @@ class CenterPCLHead(nn.Module):
                 gt_ids = target_dicts['gt_ids'][idx]
                 for i in range(0, batch_size, 2):
                     gt_ids1, gt_ids2 = np.array(gt_ids[i]), np.array(gt_ids[i+1])
+                    if gt_ids1.shape[0] == 0 or gt_ids2.shape[0] == 0:
+                        continue
+
                     paired_idx1, paired_idx2 = np.nonzero(gt_ids1[:, None] == gt_ids2)
                     paired_idx1 = [idx for idx in paired_idx1 if len(gt_ids1[idx]) > 0]
                     paired_idx2 = [idx for idx in paired_idx2 if len(gt_ids2[idx]) > 0]
@@ -386,7 +392,7 @@ class CenterPCLHead(nn.Module):
 
                     # score losses
                     score_preds1, score_preds2 = score_preds[i][paired_idx1], score_preds[i+1][paired_idx2]
-                    si_cls_loss += self.si_l2loss(score_preds1, score_preds2) * loss_weight[0]
+                    si_cls_loss += self.si_l2loss(score_preds1, score_preds2) * loss_weight[0] * head_weight
                     
                     # reg losses
                     box_preds1, box_preds2 = recovered_box_preds[i][paired_idx1], recovered_box_preds[i+1][paired_idx2]
@@ -404,9 +410,9 @@ class CenterPCLHead(nn.Module):
                                             -diff_loc2[:, 0] * torch.sin(box_gts2[:, 6]) + diff_loc2[:, 1] * torch.cos(box_gts2[:, 6]),
                                             diff_loc2[:, 2]], dim=1)
 
-                    si_reg_loss += self.si_l1loss(diff_loc1, diff_loc2) * loss_weight[1]
-                    si_reg_loss += self.si_l1loss(diff_dim1, diff_dim2) * loss_weight[2]
-                    si_reg_loss += self.si_l1loss(diff_rot1, diff_rot2) * loss_weight[3]
+                    si_reg_loss += self.si_l1loss(diff_loc1, diff_loc2) * loss_weight[1] * head_weight
+                    si_reg_loss += self.si_l1loss(diff_dim1, diff_dim2) * loss_weight[2] * head_weight
+                    si_reg_loss += self.si_l1loss(diff_rot1, diff_rot2) * loss_weight[3] * head_weight
 
                 loss += si_cls_loss + si_reg_loss
                 tb_dict['SI_cls_loss_head_%d' % idx] = si_cls_loss.item() if isinstance(si_cls_loss, torch.Tensor) else si_cls_loss

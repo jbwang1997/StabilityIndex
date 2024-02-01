@@ -346,6 +346,7 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test=False, m
             'cam_front_path': Path(ref_cam_path).relative_to(data_path).__str__(),
             'cam_intrinsic': ref_cam_intrinsic,
             'token': sample['token'],
+            'scene_token': sample['token'],
             'sweeps': [],
             'ref_from_car': ref_from_car,
             'car_from_global': car_from_global,
@@ -442,6 +443,8 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test=False, m
             num_radar_pts = np.array([anno['num_radar_pts'] for anno in annotations])
             mask = (num_lidar_pts + num_radar_pts > 0)
 
+            gt_ids = np.array([anno['instance_token'] for anno in annotations])
+
             locs = np.array([b.center for b in ref_boxes]).reshape(-1, 3)
             dims = np.array([b.wlh for b in ref_boxes]).reshape(-1, 3)[:, [1, 0, 2]]  # wlh == > dxdydz (lwh)
             velocity = np.array([b.velocity for b in ref_boxes]).reshape(-1, 3)
@@ -455,6 +458,7 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test=False, m
             info['gt_boxes'] = gt_boxes[mask, :]
             info['gt_boxes_velocity'] = velocity[mask, :]
             info['gt_names'] = np.array([map_name_from_general_to_detection[name] for name in names])[mask]
+            info['gt_ids'] = gt_ids[mask]
             info['gt_boxes_token'] = tokens[mask]
             info['num_lidar_pts'] = num_lidar_pts[mask]
             info['num_radar_pts'] = num_radar_pts[mask]
