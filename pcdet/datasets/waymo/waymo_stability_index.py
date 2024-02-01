@@ -110,11 +110,8 @@ def align_det_and_gt_by_hungarian(det_boxes, det_scores, det_names, gt_boxes, gt
         num_det = cls_det_boxes.shape[0]
         num_gt = cls_gt_boxes.shape[0]
 
-        try:
-            cls_det_boxes = np.concatenate([cls_det_boxes, cls_gt_boxes], axis=0)
-            cls_det_scores = np.concatenate([cls_det_scores, np.zeros(cls_gt_boxes.shape[0])], axis=0)
-        except:
-            import pdb; pdb.set_trace()
+        cls_det_boxes = np.concatenate([cls_det_boxes, cls_gt_boxes], axis=0)
+        cls_det_scores = np.concatenate([cls_det_scores, np.zeros(cls_gt_boxes.shape[0])], axis=0)
 
         if cls_gt_boxes.shape[0] == 0:
             continue
@@ -244,7 +241,7 @@ def eval_waymo_stability_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_g
     metrics = dict()
     confidence_vars = paired_infos['cur_det_scores'] - paired_infos['pre_det_scores']
     confidence_vars = confidence_vars / (np.quantile(paired_infos['cur_det_scores'], 0.99) - \
-        np.quantile(paired_infos['cur_det_scores'], 0.01))
+        np.quantile(paired_infos['cur_det_scores'], 0.01) + 1e-5)
     localization_vars = get_localization_variations(cur_det_biases, pre_det_biases, norm_gts)
     extent_vars = get_extent_variations(cur_det_biases, pre_det_biases, norm_gts)
     heading_vars = get_heading_variations(cur_det_biases, pre_det_biases, norm_gts)
@@ -264,39 +261,25 @@ def eval_waymo_stability_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_g
     distances = np.linalg.norm(paired_infos['cur_det_boxes3d'][:, :3], axis=1)
     for class_name in class_names:
         class_mask = paired_infos['gt_names'] == class_name
-        if not class_mask.any():
-            metrics['CONFIDENCE_VARIATION_%s' % class_name] = -1
-            metrics['LOCALIZATION_VARIATION_%s' % class_name] = -1
-            metrics['EXTENT_VARIATION_%s' % class_name] = -1
-            metrics['HEADING_VARIATION_%s' % class_name] = -1
-            metrics['STABILITY_INDEX_%s' % class_name] = -1
-            for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
-                MIN, MAX = distance
-                metrics['CONFIDENCE_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = -1
-                metrics['LOCALIZATION_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = -1
-                metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = -1
-                metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = -1
-                metrics['STABILITY_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)] = -1
-        else:
+        _confidence, _localization, _extent, _heading, _stability_index = get_values_by_mask(
+            confidence_vars, localization_vars, extent_vars, heading_vars, stability_index, mask=class_mask)
+        metrics['CONFIDENCE_VARIATION_%s' % class_name] = (1 - np.abs(_confidence)).mean()
+        metrics['LOCALIZATION_VARIATION_%s' % class_name] = _localization.mean()
+        metrics['EXTENT_VARIATION_%s' % class_name] = _extent.mean()
+        metrics['HEADING_VARIATION_%s' % class_name] = _heading.mean()
+        metrics['STABILITY_INDEX_%s' % class_name] = _stability_index.mean()
+        
+        for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
+            MIN, MAX = distance
+            distance_mask = (distances > MIN) & (distances <= MAX)
+            cur_mask = class_mask & distance_mask
             _confidence, _localization, _extent, _heading, _stability_index = get_values_by_mask(
-                confidence_vars, localization_vars, extent_vars, heading_vars, stability_index, mask=class_mask)
-            metrics['CONFIDENCE_VARIATION_%s' % class_name] = (1 - np.abs(_confidence)).mean()
-            metrics['LOCALIZATION_VARIATION_%s' % class_name] = _localization.mean()
-            metrics['EXTENT_VARIATION_%s' % class_name] = _extent.mean()
-            metrics['HEADING_VARIATION_%s' % class_name] = _heading.mean()
-            metrics['STABILITY_INDEX_%s' % class_name] = _stability_index.mean()
-            
-            for idx, distance in enumerate([[0, 30], [30, 50], [50, np.float('inf')]]):
-                MIN, MAX = distance
-                distance_mask = (distances > MIN) & (distances <= MAX)
-                cur_mask = class_mask & distance_mask
-                _confidence, _localization, _extent, _heading, _stability_index = get_values_by_mask(
-                    confidence_vars, localization_vars, extent_vars, heading_vars, stability_index, mask=cur_mask)
-                metrics['CONFIDENCE_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = (1 - np.abs(_confidence)).mean()
-                metrics['LOCALIZATION_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _localization.mean()
-                metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _extent.mean()
-                metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _heading.mean()
-                metrics['STABILITY_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)] = _stability_index.mean()
+                confidence_vars, localization_vars, extent_vars, heading_vars, stability_index, mask=cur_mask)
+            metrics['CONFIDENCE_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = (1 - np.abs(_confidence)).mean()
+            metrics['LOCALIZATION_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _localization.mean()
+            metrics['EXTENT_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _extent.mean()
+            metrics['HEADING_VARIATION_%s_%s_to_%s' % (class_name, MIN, MAX)] = _heading.mean()
+            metrics['STABILITY_INDEX_%s_%s_to_%s' % (class_name, MIN, MAX)] = _stability_index.mean()
     return metrics
 
 
@@ -360,7 +343,7 @@ def main():
         sequence_name = info['point_cloud']['lidar_sequence']
         sample_idx = info['point_cloud']['sample_idx']
         # filter out frame withous previous information
-        pre_sample_idx = sample_idx - 5
+        pre_sample_idx = sample_idx - args.sampled_interval
         pre_frame_idx = sequence_name + '_%03d' % (pre_sample_idx, )
         if pre_frame_idx not in frame_id_mapper:
             continue
@@ -370,10 +353,7 @@ def main():
         pre_det_annos.append(pred_infos[frame_id_mapper[pre_frame_idx]])
         pre_gt_annos.append(gt_infos[frame_id_mapper[pre_frame_idx]]['annos'])
 
-    t1 = time.time()
     stability_index = eval_waymo_stability_index(cur_det_annos, pre_det_annos, cur_gt_annos, pre_gt_annos, args.class_names)
-    t2 = time.time()
-    print('SI time: ', t2 - t1)
     stability_index_str = print_stability_index_results(stability_index, args.class_names)
     print(stability_index_str)
 
