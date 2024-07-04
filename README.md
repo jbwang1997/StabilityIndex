@@ -1,4 +1,4 @@
-# Towards Stable 3D Object Detection
+# <center>Towards Stable 3D Object Detection (ECCV 2024)</center>
 
 ## Abstract
 
