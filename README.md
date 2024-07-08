@@ -1,5 +1,12 @@
 # <center>Towards Stable 3D Object Detection (ECCV 2024)</center>
 
+> [Jiabao Wang*](https://jbwang1997.github.io/),
+> [Qiang Meng*](https://irvingmeng.github.io/), Guochao Liu, Liujiang Yan, Ke Wang,
+> [Ming-Ming Cheng](https://mmcheng.net/cmm/),
+> [Qibin Hou#](https://houqb.github.io/)
+
+> [Project](https://jbwang1997.github.io/projects/stability_index/index.html) / [Paper](https://arxiv.org/pdf/2407.04305)
+
 ## Abstract
 
 In autonomous driving, the temporal stability of 3D object detection greatly impacts the driving safety.
