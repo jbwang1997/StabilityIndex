@@ -7,16 +7,12 @@
 
 > [Project](https://jbwang1997.github.io/projects/stability_index/index.html) / [Paper](https://arxiv.org/pdf/2407.04305)
 
+![intro](docs/intro.png)
+
 ## Abstract
 
-In autonomous driving, the temporal stability of 3D object detection greatly impacts the driving safety.
-However, the detection stability cannot be accessed by existing metrics such as mAP and MOTA, and consequently is less explored by the community.
-To bridge this gap, this work proposes **Stability Index (SI)**, a new metric that can comprehensively evaluate the stability of 3D detectors in terms of confidence, box localization, extent, and heading.
-By benchmarking state-of-the-art object detectors on the Waymo Open Dataset, SI reveals interesting properties of object stability that have not been previously discovered by other metrics.
-To help models improve their stability, we further introduce a general and effective training strategy, called **Prediction Consistency Learning (PCL)**.
-PCL essentially encourages the prediction consistency of the same objects under different timestamps and augmentations, leading to enhanced detection stability. 
-Furthermore, we examine the effectiveness of PCL with the widely-used CenterPoint, and achieve a remarkable SI of 86.00 for vehicle class, surpassing the baseline by 5.48.
-We hope our work could serve as a reliable baseline and draw the community's attention to this crucial issue in 3D object detection.
+In autonomous driving, the temporal stability of 3D object detection greatly impacts the driving safety. However, the detection stability cannot be accessed by existing metrics such as mAP and MOTA, and consequently is less explored by the community. To bridge this gap, this work proposes **Stability Index (SI)**, a new metric that can comprehensively evaluate the stability of 3D detectors in terms of confidence, box localization, extent, and heading. By benchmarking state-of-the-art object detectors on the Waymo Open Dataset, SI reveals interesting properties of object stability that have not been previously discovered by other metrics.
+To help models improve their stability, we further introduce a general and effective training strategy, called **Prediction Consistency Learning (PCL)**. PCL essentially encourages the prediction consistency of the same objects under different timestamps and augmentations, leading to enhanced detection stability. Furthermore, we examine the effectiveness of PCL with the widely-used CenterPoint, and achieve a remarkable SI of 86.00 for vehicle class, surpassing the baseline by 5.48. We hope our work could serve as a reliable baseline and draw the community's attention to this crucial issue in 3D object detection.
 
 ![structure](docs/structure.png)
 
@@ -50,7 +46,7 @@ We hope our work could serve as a reliable baseline and draw the community's att
 
 ## Main Results
 
-We could not provide the above pretrained models due to [Waymo Dataset License Agreement](https://waymo.com/open/terms/), but people could easily achieve similar performance by training with the default configs.
+We could not provide pre-trained models due to [Waymo Dataset License Agreement](https://waymo.com/open/terms/). However, one can easily reproduce similar performances with our provided default configurations.
 
 <details>
 <summary> Benckmark on Waymo Open Dataset </summary>
@@ -435,30 +431,33 @@ We could not provide the above pretrained models due to [Waymo Dataset License A
 
 ## Installation
 
-Our *Stable Index* is implemented on the open source codebase [OpenPCDet](https://github.com/open-mmlab/OpenPCDet).
-Please follow the guidence of the [INSTALL.md](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/INSTALL.md) and [GETTING_STARTED.md](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/GETTING_STARTED.md#waymo-open-dataset) in OpenPCDet for installation of this repo and data preparation of Waymo Open Dataset.
+This repository is implemented on top of [OpenPCDet](https://github.com/open-mmlab/OpenPCDet). For package installation and data preparation, please follow the guidance of the [INSTALL.md](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/INSTALL.md) and [GETTING_STARTED.md](https://github.com/open-mmlab/OpenPCDet/blob/master/docs/GETTING_STARTED.md#waymo-open-dataset) in OpenPCDet.
 
 ## Training and Evaluation
 
-All configures using in our expeirments can be found in [waymo_stable](tools/cfgs/waymo_stable/).
-The steps to reproduce the results in paper is following:
+All our experimental configurations can be found in [waymo_stable](tools/cfgs/waymo_stable/).
+Steps to reproduce results in our paper include:
 
-### Traning Baseline CenterPoint
+### Training Baseline CenterPoint
 
-First, people need to train a baseline CenterPoint.
-We have provided the configure in [centerpoint_baselin.yaml](tools/cfgs/waymo_stable/centerpoint_baseline.yaml).
+The first step is to train a baseline CenterPoint model configured with [centerpoint_baseline.yaml](tools/cfgs/waymo_stable/centerpoint_baseline.yaml).
+
+<!-- First, people need to train a baseline CenterPoint.
+We have provided the configure in [centerpoint_baselin.yaml](tools/cfgs/waymo_stable/centerpoint_baseline.yaml). -->
 
 ```
 cd tools
 bash scripts/dist_train.sh 8 --cfg_file cfgs/waymo_stable/centerpoint_baseline.yaml
 ```
 
-### Fine-tuning with or without PCL
+### Fine-tuning with PCL
 
-We provide the confuigures of fine-tuning CenterPoint without PCL ([centerpoint_finetune.yaml](tools/cfgs/waymo_stable/centerpoint_finetune.yaml)) and with PCL ([centerpoint_PCL_n{X}.yaml](tools/cfgs/waymo_stable/centerpoint_PCL_n16.yaml)).
-Here, `X` is the maximum interval between the neighborhood sampling, described in our paper.
+We provide the configurations of fine-tuning CenterPoint without PCL ([centerpoint_finetune.yaml](tools/cfgs/waymo_stable/centerpoint_finetune.yaml)) and with PCL ([centerpoint_PCL_n{X}.yaml](tools/cfgs/waymo_stable/centerpoint_PCL_n16.yaml)). Here, `X` is the maximum interval between the neighborhood sampling, as described in our paper.
 
-Before traning,  people need to first change the arguemnt `PRETRAINED` in configures to the path of the baseline checkpoint:
+Please do not forget to fill in the correct path to baseline checkpoint in  argument `PRETRAINED` before the fine-tuning step.
+
+<!-- Before training,  people need to first change the arguemnt `PRETRAINED` in configures to the path of the baseline checkpoint: -->
+
 ```
 MODEL:
     NAME: CenterPoint
@@ -466,7 +465,7 @@ MODEL:
     PRETRAINED: '../output/waymo_stable/centerpoint_baseline/default/ckpt/checkpoint_epoch_36.pth'
 ```
 
-Then, you can finue-tune the baseline without or with PCL.
+Then, you can fine-tune the CenterPoint model with or without our PCL strategy.
 
 - Fine-tune without PCL:
 ```
@@ -481,19 +480,19 @@ bash scripts/dist_train.sh 8 --cfg_file cfgs/waymo_stable/centerpoint_PCL_n16.ya
 ```
 
 
-### Evaluation Stable Index
+### Evaluation with Stability Index
 
-*stability index* has been integrated in [waymo_dataset.py](pcdet/datasets/waymo/waymo_dataset.py) and [nuscene_dataset.py](pcdet/datasets/nuscenes/nuscenes_dataset.py).
-People can enable *SI* evaluation by simply adding `'stability_index'` to `POST_PROCESSING.EVAL_METRIC` in the configuration.
+*Stability index (SI)* has been integrated in [waymo_dataset.py](pcdet/datasets/waymo/waymo_dataset.py) and [nuscene_dataset.py](pcdet/datasets/nuscenes/nuscenes_dataset.py). One can enable *SI* evaluation by simply adding `'stability_index'` to `POST_PROCESSING.EVAL_METRIC` in the configuration, as exemplified by `EVAL_METRIC` in [centerpoint_PCL_n16.yaml](tools/cfgs/waymo_stable/centerpoint_PCL_n16.yaml). 
 
-Take [centerpoint_PCL_n16.yaml](tools/cfgs/waymo_stable/centerpoint_PCL_n16.yaml) for example. The `EVAL_METRIC` is writen as:
+
 ```
 POST_PROCESSING:
     RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
     EVAL_METRIC: ['waymo', 'stable_index']
 ```
 
-Then, the metric *mAPH* and *SI* can be accessed by running:
+Then, the *mAPH* result can be achieved by performing:
+
 ```
 cd tools
 python test.py \
@@ -501,7 +500,9 @@ python test.py \
     --ckpt ../output/waymo_stable/centerpoint_PCL_n16/default/ckpt/checkpoint_epoch_5.pth
 ```
 
-If having tested the model and got the `result.pkl` in `output`, people can directly calculate *stability index* by:
+In the end, the *SI* can be evaluated by the following commands along with the generated `result.pkl`:
+
+<!-- If having tested the model and got the `result.pkl` in `output`, people can directly calculate *stability index* by: -->
 ```
 python pcdet/datasets/waymo/waymo_stability_index.py \
     --gt_infos data/waymo/waymo_processed_data_v0_5_0_infos_val.pkl \
@@ -510,4 +511,6 @@ python pcdet/datasets/waymo/waymo_stability_index.py \
 
 ## Acknowledgement
 
-Our code is built on top of the open source codebase [OpenPCDet](https://github.com/open-mmlab/OpenPCDet). Thanks very much for their amazing works.
+Our code is developed on top of the open source codebase [OpenPCDet](https://github.com/open-mmlab/OpenPCDet). We sincerely appreciate their amazing works.
+
+<!-- Thanks very much for their amazing works. -->
